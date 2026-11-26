@@ -1,0 +1,640 @@
+package com.tmplayer.desktop.ui
+
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.size
+import com.tmplayer.ui.browse.ChatFilter
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.rememberScrollbarAdapter
+import androidx.compose.foundation.shape.CircleShape
+import com.tmplayer.desktop.os.OsInfo
+import com.tmplayer.ui.i18n.LocalStrings
+import com.tmplayer.ui.icons.TmIcons
+import com.tmplayer.ui.theme.Focus
+import com.tmplayer.ui.theme.FocusVisibility
+import com.tmplayer.ui.components.ScrollToTop
+import com.tmplayer.ui.components.FastScroller
+import com.tmplayer.ui.components.TmDropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.onPointerEvent
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.tmplayer.data.ChatSummary
+import com.tmplayer.data.Td
+import com.tmplayer.ui.browse.BrowseSection
+import com.tmplayer.ui.browse.BrowseTab
+import com.tmplayer.ui.browse.ChatListViewModel
+import com.tmplayer.ui.browse.browseSections
+import com.tmplayer.ui.browse.ChatPageChip
+import com.tmplayer.ui.browse.chatPageChips
+import com.tmplayer.ui.browse.isSelected
+import com.tmplayer.ui.browse.filterChats
+import com.tmplayer.ui.components.rememberToast
+import com.tmplayer.ui.components.pressScale
+import com.tmplayer.ui.theme.Avatar
+import com.tmplayer.ui.theme.Tone
+import kotlinx.coroutines.launch
+
+/**
+ * The chat list: the shared [ChatListViewModel], the Chats filter chips (the order, then All,
+ * Unread, Channels, Groups, People and Archived, the same [ChatFilter]s as the phone and the TV),
+ * and a search that ranks with the same fuzzy matcher. In a narrow window, which has no side bar,
+ * a second row above picks Chats, Saved Messages or a folder. With [favouritesOnly] it is the
+ * Favourites page: the starred chats and no chips.
+ */
+@Composable
+fun ChatsPage(
+    state: ShellState,
+    model: ChatListViewModel,
+    favouritesOnly: Boolean,
+) {
+    val s = LocalStrings.current
+    val ui by model.state.collectAsState()
+    val favourites by state.settings.favorites.collectAsState(initial = emptySet())
+    val folders by Td.folders.collectAsState()
+    var query by rememberSaveable(favouritesOnly) { mutableStateOf("") }
+    val toast = rememberToast()
+    val undoToast = com.tmplayer.ui.components.rememberActionToast()
+    val scope = rememberCoroutineScope()
+    val listState = if (favouritesOnly) androidx.compose.foundation.lazy.rememberLazyListState() else state.chatListState
+    val gridState = if (favouritesOnly) androidx.compose.foundation.lazy.grid.rememberLazyGridState() else state.chatGridState
+    val surface = remember(listState, gridState) { SwitchingSurface(ListSurface(listState), GridSurface(gridState, { 0 }, { Int.MAX_VALUE })) }
+    val nav = rememberKeyboardNav(surface)
+    // Back from a chat, the keyboard carries on from that chat's row rather than from nowhere.
+    var refocus by remember { mutableStateOf(state.takeChatToRefocus()) }
+
+    // Home, History and Favourites have pages of their own.
+    // Telegram's own folder tab bar (All chats where Telegram puts it, then each folder in
+    // Telegram's order), then the filters no folder already is: one row the Chats page and every
+    // folder page share.
+    val mainListPosition by Td.mainListPosition.collectAsState()
+    val chips = remember(folders, mainListPosition) { chatPageChips(folders, mainListPosition) }
+    val section = if (favouritesOnly) {
+        BrowseSection.of(BrowseTab.Favorites)
+    } else {
+        state.chatSection
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        // The chat list keeps itself live on its own (HX44): titles, photos, order, unread counts,
+        // mutes and a newly appeared chat all arrive through TDLib's own updates, so there is no
+        // button for this any more. F5 and Ctrl+R still work, as Home's do, for anyone who reaches
+        // for them, and the flood-wait toast stays behind them.
+        RegisterRefresh(state) {
+            val waiting = model.refreshUnlessRateLimited()
+            if (waiting > 0) toast(s.chatsRefreshWait(waiting))
+        }
+        // The page's name alone, at the start like every other page's: the chips under it
+        // already say which slice of the list this is, and a line under the name said it again.
+        PageHeader(
+            title = if (favouritesOnly) s.navFavourites else section.heading,
+            actions = {
+                // Add or remove chats in one click; not while the setup or the gate is up.
+                if (state.chooseChatsAllowed) {
+                    com.tmplayer.ui.components.ChooseChatsButton(
+                        size = CHOOSE_CHATS_SIZE,
+                        shortcut = CHOOSE_CHATS_SHORTCUT,
+                        onClick = { state.chooseChats() },
+                    )
+                }
+                SearchField(
+                    query = query,
+                    onQuery = { query = it },
+                    placeholder = s.chatsSearch,
+                    focus = state.searchFocus,
+                    modifier = Modifier.widthIn(min = 160.dp, max = 280.dp),
+                    onDown = { nav.focus(0) },
+                )
+            },
+        )
+        if (!favouritesOnly) {
+            ChoiceChips(
+                buildList {
+                    if (section.isChats) {
+                        val sort = state.chatSort
+                        add(
+                            Choice("sort", sort.label, sort.icon, selected = false, description = s.browseSortBy(sort.label)) {
+                                state.chatSort = sort.toggled
+                            },
+                        )
+                    }
+                    chips.forEach { chip ->
+                        val selected = chip.isSelected(section, state.chatFilter)
+                        add(
+                            when (chip) {
+                                // A filter is a filter of the Chats list, so from a folder it goes back there.
+                                is ChatPageChip.Filter -> Choice(chip.filter.name, chip.label, chip.icon, selected) {
+                                    state.chatFilter = chip.filter
+                                    state.showChats(BrowseSection.of(BrowseTab.Chats))
+                                }
+                                is ChatPageChip.Folder -> Choice(BrowseSection.encode(chip.folder), chip.label, chip.icon, selected) {
+                                    state.showChats(chip.folder)
+                                }
+                            },
+                        )
+                    }
+                },
+            )
+        }
+        StateBox(ui, onRetry = { model.retry() }, onAction = { model.load() }, skeleton = { ChatListSkeleton() }) { data ->
+            LaunchedEffect(data.chats) { state.noteChatTitles(data.chats) }
+            val filter = state.chatFilter
+            val sort = state.chatSort
+            val visible = remember(data.chats, section, favourites, query, filter, sort) {
+                filterChats(data.chats, section, favourites, query, filter, sort)
+            }
+            if (visible.isEmpty()) {
+                // A folder whose members are not known is not an empty one (HX32).
+                val folderRead = (section as? BrowseSection.Folder)?.let { data.folderRead(it.id) } ?: com.tmplayer.ui.browse.FolderRead.Loaded
+                val folderUnknown = query.isBlank() && folderRead != com.tmplayer.ui.browse.FolderRead.Loaded
+                EmptyNote(
+                    icon = when {
+                        favouritesOnly && query.isBlank() -> TmIcons.StarOutline
+                        else -> com.tmplayer.ui.browse.emptyTabIcon(section, query, filter)
+                    },
+                    text = when {
+                        query.isNotBlank() -> s.chatsNoMatch(query)
+                        folderRead == com.tmplayer.ui.browse.FolderRead.Loading -> s.browseFolderLoading
+                        folderRead == com.tmplayer.ui.browse.FolderRead.NotLoaded -> s.browseFolderNotLoaded
+                        favouritesOnly -> s.chatsFavouritesEmpty
+                        section.isChats && filter != ChatFilter.All -> s.chatsSectionEmpty(filter.label)
+                        else -> s.chatsSectionEmpty(section.label)
+                    },
+                    // No chat by that name in the list: the same words across every chat, which
+                    // also asks Telegram for a chat with that @username.
+                    actionLabel = when {
+                        query.isNotBlank() -> s.searchAllChats
+                        folderRead == com.tmplayer.ui.browse.FolderRead.Loading -> null
+                        folderRead == com.tmplayer.ui.browse.FolderRead.NotLoaded -> s.commonTryAgain
+                        // An empty filter or folder of the chats: back to all of them.
+                        section.isChats && filter != ChatFilter.All -> s.browseGoToChats
+                        favouritesOnly -> s.browseGoToChats
+                        else -> null
+                    },
+                    onAction = {
+                        if (folderUnknown) {
+                            model.retryFolders()
+                        } else if (query.isNotBlank()) {
+                            state.searchEverywhere(query)
+                        } else {
+                            state.chatFilter = ChatFilter.All
+                            state.showChats(BrowseSection.of(BrowseTab.Chats))
+                        }
+                    },
+                )
+            } else {
+                LaunchedEffect(Unit) {
+                    val back = refocus ?: return@LaunchedEffect
+                    refocus = null
+                    nav.focus(visible.indexOfFirst { it.id == back })
+                }
+                ChatList(
+                    chats = visible,
+                    favourites = favourites,
+                    listState = listState,
+                    gridState = gridState,
+                    surface = surface,
+                    byName = sort == com.tmplayer.ui.browse.ChatSort.Name,
+                    paging = model.paging.collectAsState().value,
+                    onMoreChats = model::loadMoreChats,
+                    nav = nav,
+                    onOpen = state::openChat,
+                    onStar = { chat -> scope.launch { state.settings.toggleFavorite(chat.id) } },
+                    actions = ChatRowActions(
+                        onHide = { chat ->
+                            // "Remove from TMPlayer": unticked in Add chats, the one list of which
+                            // chats show (AddedChats.removing). Gone from the list is the answer; no
+                            // toast (user, 2026-10-22). The whole list, before the kids lock, so
+                            // under "every chat" the rest of it becomes the choice.
+                            val everything = model.everything.value.map { com.tmplayer.data.AddedChat(it.id, it.title) }
+                            scope.launch {
+                                runCatching { state.settings.removeChat(chat.id, everything) }
+                                    .onFailure { System.err.println("Chats: removing a chat failed: $it") }
+                            }
+                        },
+                    ),
+                )
+            }
+        }
+    }
+}
+
+/** One chip in a [ChoiceChips] row. */
+@androidx.compose.runtime.Immutable
+internal class Choice(
+    val key: String,
+    val label: String,
+    val icon: ImageVector,
+    val selected: Boolean,
+    /** What a screen reader says instead of [label], when the label alone is unclear. */
+    val description: String? = null,
+    val onClick: () -> Unit,
+)
+
+/**
+ * A row of chips under a page's heading: the Chats filters and order, History's two tabs, and in
+ * a narrow window the chat sections. Scrolls sideways when the window is too narrow for all of it.
+ * [inset] is the room before the first chip: the page margin, or less inside a list that already
+ * stands in from the page's edge (Downloads), so the chips start under its headings.
+ */
+@Composable
+internal fun ChoiceChips(choices: List<Choice>, inset: androidx.compose.ui.unit.Dp = pageMargin()) {
+    LazyRow(
+        Modifier.fillMaxWidth().padding(bottom = 4.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = inset),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(choices, key = { it.key }) { choice ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // A pick cross-fades the chip into its chosen colours rather than switching them,
+                // and the chip gives a little under the press, as on the phone.
+                val press = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                val scheme = MaterialTheme.colorScheme
+                val container by androidx.compose.animation.animateColorAsState(
+                    if (choice.selected) scheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent,
+                    com.tmplayer.ui.theme.Motion.standard(com.tmplayer.ui.theme.Motion.Fast),
+                    label = "chipBack",
+                )
+                val ink by androidx.compose.animation.animateColorAsState(
+                    if (choice.selected) scheme.onSecondaryContainer else scheme.onSurfaceVariant,
+                    com.tmplayer.ui.theme.Motion.standard(com.tmplayer.ui.theme.Motion.Fast),
+                    label = "chipInk",
+                )
+                val glyph by androidx.compose.animation.animateColorAsState(
+                    if (choice.selected) scheme.onSecondaryContainer else scheme.primary,
+                    com.tmplayer.ui.theme.Motion.standard(com.tmplayer.ui.theme.Motion.Fast),
+                    label = "chipIcon",
+                )
+                FilterChip(
+                    selected = choice.selected,
+                    onClick = choice.onClick,
+                    label = { Text(choice.label, maxLines = 1) },
+                    // The chosen chip's glyph fills in with a drop, as the bar's do.
+                    leadingIcon = { com.tmplayer.ui.components.SelectableIcon(choice.icon, selected = choice.selected, tint = glyph, size = 18.dp) },
+                    colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                        containerColor = container,
+                        selectedContainerColor = container,
+                        labelColor = ink,
+                        selectedLabelColor = ink,
+                        iconColor = glyph,
+                        selectedLeadingIconColor = glyph,
+                    ),
+                    interactionSource = press,
+                    modifier = Modifier.pressScale(press).then(
+                        choice.description?.let { words -> Modifier.semantics { contentDescription = words } } ?: Modifier,
+                    ),
+                )
+                // The order is a different kind of control from the filters after it.
+                if (choice.key == "sort") Box(Modifier.width(1.dp).height(24.dp).background(Tone.outline))
+            }
+        }
+    }
+}
+
+/**
+ * What a chat row can do besides open and star (HX30: nothing here changes the chat in Telegram
+ * itself any more; pinning, muting, archiving and marking read all stayed there).
+ */
+internal class ChatRowActions(
+    /** "Remove from TMPlayer": unticks the chat in Add chats ([com.tmplayer.data.AddedChats.removing]); null leaves the entry out. */
+    val onHide: ((ChatSummary) -> Unit)? = null,
+)
+
+/**
+ * The rows themselves, with a scrollbar and the keyboard of [KeyboardNav]: Up and Down a row,
+ * Home and End, Page Up and Page Down, Enter opens, S stars, H hides, P pins, M mutes, A archives, R marks
+ * read, and the menu key or Shift+F10 opens the row's menu (as a right click does). Split from
+ * [ChatsPage] so the UI tests can drive it without TDLib.
+ */
+@Composable
+internal fun ChatList(
+    chats: List<ChatSummary>,
+    favourites: Set<Long>,
+    listState: LazyListState,
+    nav: KeyboardNav,
+    onOpen: (ChatSummary) -> Unit,
+    onStar: (ChatSummary) -> Unit,
+    actions: ChatRowActions = ChatRowActions(),
+    /** Listed by name: the fast scroller's bubble gives the letter. */
+    byName: Boolean = false,
+    /** Whether Telegram may hold older chats than were read, and whether they are on their way. */
+    paging: com.tmplayer.ui.browse.ChatPaging = com.tmplayer.ui.browse.ChatPaging(),
+    /** Reads the next chats, as the list's end comes near. */
+    onMoreChats: () -> Unit = {},
+    /** The wide window's grid, and the surface the keyboard follows between it and the list. */
+    gridState: androidx.compose.foundation.lazy.grid.LazyGridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState(),
+    surface: SwitchingSurface = remember(listState, gridState) { SwitchingSurface(ListSurface(listState), GridSurface(gridState, { 0 }, { Int.MAX_VALUE })) },
+) {
+    val more = paging.more && !paging.loading && paging.failure == null
+    // A narrow window keeps the rows. A wide one has room for two or more columns of cards, so the
+    // page fills its width instead of leaving the right of every row empty (user, 2026-10-27).
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val wide = maxWidth - pageMargin() * 2 >= ChatCardMin * 2 + ChatCardGap
+        SideEffect { surface.wide = wide }
+        val footer: @Composable () -> Unit = {
+            com.tmplayer.ui.components.PageFoot(paging.loading, paging.failure, onMoreChats, Modifier.padding(horizontal = ChatRowInset)) {
+                MoreChatsSkeleton()
+            }
+        }
+        val count by rememberUpdatedState(chats.size)
+        val byId = remember(chats) { chats.associateBy { it.id } }
+        val label: ((Any) -> String?)? = if (byName) ({ key -> byId[key]?.let { com.tmplayer.ui.browse.ScrollLabels.letter(it.title) } }) else null
+        if (wide) {
+            com.tmplayer.ui.components.LoadMoreAhead(gridState, more, onLoadMore = onMoreChats)
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(ChatCardMin),
+                state = gridState,
+                modifier = Modifier.fillMaxSize().padding(end = 12.dp).navKeys(nav) { count }.remembersRemoteItem(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = pageMargin(),
+                    end = pageMargin(),
+                    top = 8.dp,
+                    bottom = 8.dp + com.tmplayer.ui.components.LocalBottomChrome.current,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(ChatCardGap),
+                verticalArrangement = Arrangement.spacedBy(ChatCardGap),
+            ) {
+                itemsIndexed(chats, key = { _, it -> it.id }) { index, chat ->
+                    ChatRow(
+                        chat = chat,
+                        favourite = chat.id in favourites,
+                        modifier = Modifier.animateItem().navCell(nav, index),
+                        onOpen = { onOpen(chat) },
+                        onStar = { onStar(chat) },
+                        actions = actions,
+                        card = true,
+                    )
+                }
+                if (paging.loading || paging.failure != null) {
+                    item(key = "more-chats", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, contentType = "more-chats") { footer() }
+                }
+            }
+            ScrollToTop(gridState)
+            FastScroller(gridState, label = label) {
+                VerticalScrollbar(rememberScrollbarAdapter(gridState), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+            }
+        } else {
+            // Telegram's older chats read as the end of the list comes near, a screen ahead.
+            com.tmplayer.ui.components.LoadMoreAhead(listState, more, onLoadMore = onMoreChats)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().padding(end = 12.dp).navKeys(nav) { count }.remembersRemoteItem(),
+                // The row's own 12 dp inset plus this is the page margin, so the avatars line up with
+                // the heading and the chips above them. The rows sit 2 dp apart, so a hovered row and
+                // the focused one beside it never run into one block.
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = pageMargin() - ChatRowInset,
+                    end = pageMargin() - ChatRowInset,
+                    top = 8.dp,
+                    // Clear of the floating bar, so the last chat can be scrolled out from under it.
+                    bottom = 8.dp + com.tmplayer.ui.components.LocalBottomChrome.current,
+                ),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                itemsIndexed(chats, key = { _, it -> it.id }) { index, chat ->
+                    ChatRow(
+                        chat = chat,
+                        favourite = chat.id in favourites,
+                        // A chat that moves (pinned, a new post) slides to its place rather than jumping.
+                        modifier = Modifier.animateItem().navCell(nav, index),
+                        onOpen = { onOpen(chat) },
+                        onStar = { onStar(chat) },
+                        actions = actions,
+                    )
+                }
+                if (paging.loading || paging.failure != null) {
+                    item(key = "more-chats", contentType = "more-chats") { footer() }
+                }
+            }
+            ScrollToTop(listState)
+            // The hold to scroll handle on a long list (the letter in its bubble when listed by name),
+            // the scrollbar on a short one.
+            FastScroller(listState, label = label) {
+                VerticalScrollbar(rememberScrollbarAdapter(listState), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
+@Composable
+internal fun ChatRow(
+    chat: ChatSummary,
+    favourite: Boolean,
+    onOpen: () -> Unit,
+    onStar: () -> Unit,
+    modifier: Modifier = Modifier,
+    actions: ChatRowActions = ChatRowActions(),
+    /** A cell of a wide window's grid: the same row, as wide as its column rather than capped. */
+    card: Boolean = false,
+) {
+    val s = LocalStrings.current
+    var hasFocus by remember { mutableStateOf(false) }
+    // Drawn for the keyboard only: a click opens the chat, and coming back to a ringed row read
+    // as a row still selected.
+    val focused = hasFocus && FocusVisibility.visible
+    var menu by remember { mutableStateOf(false) }
+    val hover = remember { MutableInteractionSource() }
+    val hovered by hover.collectIsHoveredAsState()
+    // A row the pointer or the keyboard rests on is likely the next chat opened: its first page is
+    // fetched behind, so the grid opens with it ([com.tmplayer.data.PageQueries]).
+    LaunchedEffect(chat.id, hovered || hasFocus) {
+        if (!hovered && !hasFocus) return@LaunchedEffect
+        kotlinx.coroutines.delay(com.tmplayer.data.PageQueries.PREFETCH_DWELL_MS)
+        com.tmplayer.data.PageQueries.prefetchChat(chat.id)
+    }
+    // No card at rest: the row is the avatar and the words on the page's ground. Under the pointer
+    // or the keyboard it lifts onto the step above, and the keyboard's row also takes the ring.
+    val fill = when {
+        focused -> Tone.surfaceHigh
+        hovered -> Tone.surface
+        else -> Color.Transparent
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .then(if (card) Modifier else Modifier.widthIn(max = 960.dp))
+            .clip(MaterialTheme.shapes.medium)
+            .background(fill)
+            .hoverable(hover)
+            .then(if (focused) Modifier.border(Focus.Edge, Tone.accent, MaterialTheme.shapes.medium) else Modifier)
+            .onPointerEvent(PointerEventType.Press) { event ->
+                val macContext = CHATS_ON_MAC && event.keyboardModifiers.isCtrlPressed && event.buttons.isPrimaryPressed
+                if (event.buttons.isSecondaryPressed || macContext) menu = true
+            }
+            .then(modifier)
+            .onFocusChanged { hasFocus = it.isFocused }
+            .onPreviewKeyEvent { event ->
+                // Enter opens (the click). The letters are the row's menu, one key each.
+                if (GridNav.isMenuKey(event)) {
+                    menu = true
+                    return@onPreviewKeyEvent true
+                }
+                if (event.type != KeyEventType.KeyDown || event.isCtrlPressed || event.isMetaPressed ||
+                    event.isAltPressed || event.isShiftPressed
+                ) {
+                    return@onPreviewKeyEvent false
+                }
+                when (event.key) {
+                    Key.S -> onStar()
+                    Key.H -> actions.onHide?.invoke(chat) ?: return@onPreviewKeyEvent false
+                    else -> return@onPreviewKeyEvent false
+                }
+                true
+            }
+            .clickable(onClick = onOpen)
+            .padding(horizontal = ChatRowInset, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        ChatAvatar(chat.miniThumbnail, chat.photoFileId, chat.title, Avatar.Compact + 8.dp)
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (chat.isPinned) Icon(TmIcons.Pin, contentDescription = s.chatsPinnedLabel, tint = Tone.muted, modifier = Modifier.width(14.dp))
+                Text(
+                    chat.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(chat.kind.label, style = MaterialTheme.typography.bodySmall, color = Tone.muted)
+        }
+        if (chat.unreadCount > 0) {
+            Box(
+                Modifier
+                    .clip(CircleShape)
+                    .background(if (chat.isMuted) Tone.surfaceHigh else Tone.accent)
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    if (chat.unreadCount > 999) "999+" else chat.unreadCount.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (chat.isMuted) Tone.muted else Tone.onAccent,
+                )
+            }
+        }
+        TipIconButton(
+            if (favourite) TmIcons.Star else TmIcons.StarOutline,
+            if (favourite) s.chatsUnfavourite else s.chatsFavourite,
+            onStar,
+            shortcut = "S",
+            tint = if (favourite) Tone.caution else Tone.muted,
+        )
+        Box {
+            ChatRowMenu(chat, favourite, menu, onDismiss = { menu = false }, onOpen, onStar, actions)
+        }
+    }
+}
+
+/**
+ * The row's menu, the phone's long press menu with the key for each entry beside it. Nothing
+ * here changes the chat in Telegram (HX30): the star and hide stay private to this computer.
+ */
+@Composable
+private fun ChatRowMenu(
+    chat: ChatSummary,
+    favourite: Boolean,
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onOpen: () -> Unit,
+    onStar: () -> Unit,
+    actions: ChatRowActions,
+) {
+    val s = LocalStrings.current
+    @Composable
+    fun entry(label: String, key: String?, icon: ImageVector, action: () -> Unit) {
+        DropdownMenuItem(
+            text = { Text(label) },
+            leadingIcon = { Icon(icon, contentDescription = null) },
+            trailingIcon = key?.let { { Text(it, color = Tone.muted, style = MaterialTheme.typography.labelMedium) } },
+            onClick = {
+                onDismiss()
+                action()
+            },
+        )
+    }
+    TmDropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        entry(s.commonOpen, s.keysEnter, TmIcons.Folder, onOpen)
+        entry(
+            if (favourite) s.chatsUnfavourite else s.chatsFavourite,
+            "S",
+            if (favourite) TmIcons.Star else TmIcons.StarOutline,
+            onStar,
+        )
+        // Private to this computer too: the chat leaves TMPlayer's lists, never Telegram.
+        actions.onHide?.let { hide -> entry(s.browseRemoveChat, "H", TmIcons.VisibilityOff) { hide(chat) } }
+    }
+}
+
+/** How far a chat row's avatar sits in from the row's own edge. */
+private val ChatRowInset = 12.dp
+
+/** The narrowest a chat card gets in the wide layout, and the gap between cards. */
+private val ChatCardMin = 340.dp
+private val ChatCardGap = 12.dp
+
+private val CHATS_ON_MAC: Boolean get() = OsInfo.isMac

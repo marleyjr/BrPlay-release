@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0e10" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f6fafd" media="(prefers-color-scheme: light)">
+  <meta name="color-scheme" content="dark light">
+  <title>TMPlayer Web: Telegram video player in your browser</title>
+  <meta name="description" content="Watch the videos already in your own Telegram chats in any modern browser. Sign in with your Telegram account, pick a chat and press Watch. Free, in beta.">
+  <link rel="canonical" href="https://web.tmplayer.org/">
+  <meta property="og:title" content="TMPlayer Web: Telegram video player in your browser">
+  <meta property="og:description" content="Watch the videos already in your own Telegram chats in any modern browser. Free, in beta.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://web.tmplayer.org/">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="TMPlayer">
+  <style>
+    html,body{margin:0;height:100%;background:#0c0e10;color:#f2f4f5}
+    #boot{display:grid;place-items:center;min-height:100vh;min-height:100dvh}
+    #boot .loader{width:40px;height:40px;box-sizing:border-box;border-radius:50%;border:4px solid currentColor;border-top-color:transparent;animation:boot-spin .8s linear infinite}@keyframes boot-spin{to{transform:rotate(360deg)}}
+    @media (prefers-color-scheme:light){html:not([data-theme=dark]):not([data-theme=black]):not([data-form=tv]) body{background:#f6fafd;color:#171c1f}}
+    html[data-theme=light] body{background:#f6fafd;color:#171c1f}
+    html[data-theme=black] body{background:#000}
+  </style>
+  <script>try{var t=localStorage.getItem('tmplayer-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+  <script>
+    // The layout (phone, desktop or TV) before the first paint: the same rules as src/form.ts, whose Settings choice is kept under tmplayer-layout.
+    // ?tv=1 or ?tv=0 in the address (the TV wrappers, a link) is that choice made too: TV or Desktop, kept as Settings keeps it,
+    // and Settings leaves its Layout out for the rest of the tab's life (tmplayer-layout-fixed), as the address decides it.
+    (function(){var d=document.documentElement,f,s,u=/[?&]tv=([01])(?:&|$)/.exec(location.search),m=function(q){return matchMedia(q).matches};
+    try{if(u)sessionStorage.setItem('tmplayer-layout-fixed','1')}catch(e){}
+    try{if(u)localStorage.setItem('tmplayer-layout',u[1]==='1'?'tv':'desktop');s=localStorage.getItem('tmplayer-layout')}catch(e){if(u)s=u[1]==='1'?'tv':'desktop'}
+    f=/Web0S|webOS|Tizen|SMART-TV|SmartTV|\bAFT|CrKey|HbbTV|Android.*\bTV\b/i.test(navigator.userAgent)||(/Android/i.test(navigator.userAgent)&&navigator.maxTouchPoints===0)?'tv':(m('(pointer: coarse)')&&m('(hover: none)')&&Math.min(innerWidth,innerHeight)<840)?'phone':'desktop';
+    if(f!=='phone'&&(s==='desktop'||s==='tv'))f=s;
+    d.dataset.form=f})()
+  </script>
+  <style>#old{max-width:420px;margin:0 auto;padding:48px 16px;font:16px/24px system-ui,sans-serif;text-align:center}#old a{color:#4fb3ff}</style>
+  <script>
+    // A browser older than the app's code (ES2022, module workers, BigInt) gets a sentence, not a blank page.
+    (function(){var ok=false;try{new Function('class A{static{}}');ok=!!([].at&&window.structuredClone&&window.BigInt&&window.Worker&&Promise.allSettled)}catch(e){}
+    if(ok)return;document.documentElement.dataset.old='1';document.addEventListener('DOMContentLoaded',function(){document.getElementById('app').innerHTML='<div id="old"><h1>%TOO_OLD_TITLE%</h1><p>%TOO_OLD_BODY%</p><p><a href="https://tmplayer.org/#download">%APP_GET%</a></p></div>'})})()
+  </script>
+</head>
+<body>
+  <div id="app"><div id="boot"><div class="loader" role="progressbar" aria-label="TMPlayer"></div></div></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

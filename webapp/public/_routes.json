@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "include": ["/*"],
+  "exclude": ["/assets/*", "/tv/*", "/libav/*", "/sw.js", "/manifest.webmanifest", "/licenses.txt", "/*.png", "/*.svg"]
+}

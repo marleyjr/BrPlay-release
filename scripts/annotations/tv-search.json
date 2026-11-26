@@ -1,0 +1,37 @@
+{
+  "source": "tv-search-dark.png",
+  "output": "site/public/screenshots/tv-search.webp",
+  "crop": [
+    64,
+    160,
+    1200,
+    600
+  ],
+  "width": 960,
+  "marks": [
+    {
+      "type": "underline",
+      "from": [
+        206,
+        262
+      ],
+      "to": [
+        384,
+        262
+      ]
+    },
+    {
+      "type": "arrow",
+      "from": [
+        420,
+        282
+      ],
+      "to": [
+        345,
+        392
+      ],
+      "bend": -0.35,
+      "seed": 4
+    }
+  ]
+}

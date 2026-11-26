@@ -1,0 +1,43 @@
+{
+  "source": "ph-tour-home-dark.png",
+  "output": "app/src/main/res/drawable-nodpi/tour_home_dark.webp",
+  "crop": [
+    0,
+    0,
+    1080,
+    2400
+  ],
+  "width": 720,
+  "marks": [
+    {
+      "type": "circle",
+      "box": [
+        40,
+        1636,
+        490,
+        72
+      ],
+      "seed": 64
+    },
+    {
+      "type": "circle",
+      "box": [
+        120,
+        1070,
+        840,
+        92
+      ],
+      "seed": 65
+    },
+    {
+      "type": "circle",
+      "box": [
+        395,
+        2216,
+        110,
+        108
+      ],
+      "seed": 66
+    }
+  ]
+}

@@ -1,0 +1,210 @@
+package com.tmplayer.desktop.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.tmplayer.data.CacheShelf
+import com.tmplayer.data.DownloadRunner
+import com.tmplayer.data.MediaItem
+import com.tmplayer.data.OfflineDownloads
+import com.tmplayer.data.ResumeRecord
+import com.tmplayer.data.SettingsStore
+import com.tmplayer.data.Td
+import com.tmplayer.desktop.DesktopPaths
+import com.tmplayer.i18n.L
+import com.tmplayer.ui.components.rememberToast
+import com.tmplayer.ui.i18n.LocalStrings
+import com.tmplayer.ui.theme.Tone
+import kotlinx.coroutines.launch
+
+/**
+ * The posters picked in a chat's grid for "Download selected": Ctrl+click (Cmd+click on macOS)
+ * adds or takes away one, Shift+click takes in everything from the last one picked.
+ *
+ * Indices are the grid's, ids are [MediaItem.id]; the ids are what is kept, so a page loading
+ * underneath does not change what was picked.
+ */
+@Stable
+class GridSelection(
+    /**
+     * History's: every card can be ticked (a chat's grid leaves out a video its chat will not let
+     * anyone keep), each tile shows its tick box on hover, and the mode can be on with none ticked.
+     */
+    val history: Boolean = false,
+    private val idAt: (Int) -> String?,
+) {
+    var ids by mutableStateOf<Set<String>>(emptySet())
+        private set
+    private var anchor: Int? = null
+
+    /** Select mode started from History's Select button, before anything is ticked. */
+    private var started by mutableStateOf(false)
+
+    val active: Boolean get() = ids.isNotEmpty() || started
+
+    /** History's Select: the mode on, nothing ticked yet; a click then ticks rather than opens. */
+    fun start() {
+        started = true
+    }
+
+    fun isSelected(id: String) = id in ids
+
+    /** Ctrl+click: one poster in or out. */
+    fun toggle(index: Int) {
+        val id = idAt(index) ?: return
+        ids = if (id in ids) ids - id else ids + id
+        anchor = index
+    }
+
+    /** Shift+click: everything between the last poster picked and this one, added. */
+    fun extend(index: Int) {
+        val from = anchor ?: return toggle(index)
+        val range = if (from <= index) from..index else index..from
+        ids = ids + range.mapNotNull(idAt)
+        anchor = index
+    }
+
+    fun selectAll(all: List<String>) {
+        ids = all.toSet()
+    }
+
+    fun clear() {
+        ids = emptySet()
+        anchor = null
+        started = false
+    }
+
+    /** Takes away ticks whose cards have left the page, so the count says what Remove would take. */
+    fun keepOnly(present: Set<String>) {
+        if (ids.any { it !in present }) ids = ids.filterTo(HashSet()) { it in present }
+    }
+}
+
+/** The grid's selection, for the posters inside it; null where nothing can be picked. */
+internal val LocalGridSelection = compositionLocalOf<GridSelection?> { null }
+
+/**
+ * The downloads index by [MediaItem.id], read once per grid rather than once per poster, so every
+ * badge and menu says "Downloaded" from the same answer.
+ */
+internal val LocalDownloadIndex = staticCompositionLocalOf<Map<String, ResumeRecord>> { emptyMap() }
+
+/** The bar over the grid while posters are picked: how many, Select all, Download selected, Clear. */
+@Composable
+internal fun SelectionBar(
+    state: ShellState,
+    selection: GridSelection,
+    items: List<MediaItem>,
+    chatTitle: String,
+    index: Map<String, ResumeRecord>,
+    modifier: Modifier = Modifier,
+) {
+    val s = LocalStrings.current
+    val scope = rememberCoroutineScope()
+    val toast = rememberToast()
+    Surface(shape = MaterialTheme.shapes.large, color = Tone.surfaceHigh, tonalElevation = 6.dp, modifier = modifier) {
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            val count = selection.ids.size
+            Text(s.browseSelectedCount(count), style = MaterialTheme.typography.titleSmall)
+            TextButton(onClick = { selection.selectAll(items.filter { it.canBeSaved }.map { it.id }) }) { Text(s.browseSelectAll) }
+            TextButton(onClick = { selection.clear() }) { Text(s.commonClear) }
+            Button(onClick = {
+                val chosen = items.filter { selection.isSelected(it.id) }
+                selection.clear()
+                scope.launch {
+                    val title = chatTitle.ifBlank { chosen.firstOrNull()?.let { state.chatTitleOf(it.chatId) }.orEmpty() }
+                    toast(downloadSelected(state.downloads, state.settings, chosen, title, index))
+                }
+            }) { Text(s.browseDownloadSelected) }
+        }
+    }
+}
+
+/**
+ * A download refused for room still needs room for all of it, whatever the mode. When Low storage
+ * mode is off and the first refused video would stream in it, the viewer is asked whether to switch
+ * and watch it instead; every time, beside the refusal toast.
+ */
+private suspend fun offerLowStorage(
+    settings: SettingsStore,
+    wanted: List<MediaItem>,
+    candidates: List<CacheShelf.Candidate>,
+    batch: CacheShelf.Batch,
+) {
+    if (runCatching { settings.lowStorageModeNow() }.getOrDefault(true)) return
+    val refused = candidates.indices.firstOrNull { it !in batch.fits && it !in batch.alreadyHere } ?: return
+    val candidate = candidates[refused]
+    val plan = CacheShelf.plan(
+        targetFileId = candidate.fileId,
+        targetSizeBytes = candidate.sizeBytes,
+        targetPartialBytes = candidate.partialBytes,
+        alreadyCached = false,
+        cached = emptyList(),
+        freeBytes = DesktopPaths.disk().freeBytes,
+        streaming = true,
+    )
+    if ((plan as? CacheShelf.Plan.NotEnoughSpace)?.fitsInLowStorage == true) LowStorageQuestion.offer(wanted[refused])
+}
+
+/**
+ * Queues every picked video that will fit, over [CacheShelf.planBatch]: one already downloaded or
+ * coming down is skipped, one whole in the cache is moved rather than fetched and costs nothing,
+ * and the rest are planned against the cache drive's free space with the cached videos nobody
+ * picked offered as room. Returns the sentence for the toast.
+ */
+internal suspend fun downloadSelected(
+    runner: DownloadRunner,
+    settings: SettingsStore,
+    chosen: List<MediaItem>,
+    chatTitle: String,
+    index: Map<String, ResumeRecord>,
+): String {
+    val active = OfflineDownloads.active.value
+    val wanted = chosen.filter { item -> item.canBeSaved && item.id !in index && active[item.fileId]?.busy != true }
+    if (wanted.isEmpty()) return L.browseAlreadyDownloaded
+    val candidates = wanted.map { item ->
+        CacheShelf.Candidate(
+            fileId = item.fileId,
+            sizeBytes = item.sizeBytes,
+            partialBytes = runCatching { Td.localDownloadedBytes(item.fileId) }.getOrDefault(0L),
+            alreadyHere = item.onDevice,
+        )
+    }
+    val records = runCatching { settings.cachedVideosNow() }.getOrDefault(emptyList())
+    val held = records.map { CacheShelf.Held(it.fileId, runCatching { Td.localDownloadedBytes(it.fileId) }.getOrDefault(0L), it.updatedAt) }
+    val batch = CacheShelf.planBatch(candidates, held, DesktopPaths.disk().freeBytes)
+    for (id in batch.reclaimFileIds) {
+        runCatching { Td.deleteFile(id) }
+        records.firstOrNull { it.fileId == id }?.let { runCatching { settings.forgetCachedVideo(it.chatId, it.messageId) } }
+    }
+    val starting = (batch.alreadyHere + batch.fits).sorted().map { wanted[it] }
+    starting.forEach { OfflineDownloads.start(runner, it, chatTitle) }
+    if (batch.outOfSpace) offerLowStorage(settings, wanted, candidates, batch)
+    val left = wanted.size - starting.size
+    val queued = L.browseDownloadingVideos(starting.size)
+    return when {
+        starting.isEmpty() -> L.browseNoSpaceForAny
+        left > 0 -> L.browseSomeDidNotFit(queued, left)
+        else -> queued
+    }
+}

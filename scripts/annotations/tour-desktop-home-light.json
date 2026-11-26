@@ -1,0 +1,43 @@
+{
+  "source": "desktop/home-meta-light.png",
+  "output": "ui/src/jvmMain/resources/onboarding/tour-home-light.webp",
+  "crop": [
+    0,
+    0,
+    1920,
+    1200
+  ],
+  "width": 1280,
+  "marks": [
+    {
+      "type": "circle",
+      "box": [
+        30,
+        780,
+        320,
+        52
+      ],
+      "seed": 114
+    },
+    {
+      "type": "circle",
+      "box": [
+        40,
+        444,
+        600,
+        56
+      ],
+      "seed": 115
+    },
+    {
+      "type": "circle",
+      "box": [
+        864,
+        1080,
+        80,
+        76
+      ],
+      "seed": 116
+    }
+  ]
+}

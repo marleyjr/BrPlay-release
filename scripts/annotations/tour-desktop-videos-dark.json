@@ -1,0 +1,43 @@
+{
+  "source": "desktop/chats.png",
+  "output": "ui/src/jvmMain/resources/onboarding/tour-videos-dark.webp",
+  "crop": [
+    0,
+    0,
+    1920,
+    1200
+  ],
+  "width": 1280,
+  "marks": [
+    {
+      "type": "circle",
+      "box": [
+        30,
+        222,
+        300,
+        70
+      ],
+      "seed": 111
+    },
+    {
+      "type": "circle",
+      "box": [
+        30,
+        328,
+        330,
+        72
+      ],
+      "seed": 112
+    },
+    {
+      "type": "circle",
+      "box": [
+        1370,
+        28,
+        425,
+        64
+      ],
+      "seed": 113
+    }
+  ]
+}

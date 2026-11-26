@@ -1,0 +1,53 @@
+{
+  "source": "ph-tour-settings-light.png",
+  "output": "app/src/main/res/drawable-nodpi/tour_settings.webp",
+  "crop": [
+    0,
+    0,
+    1080,
+    2040
+  ],
+  "width": 720,
+  "marks": [
+    {
+      "type": "circle",
+      "box": [
+        84,
+        647,
+        96,
+        96
+      ],
+      "seed": 77
+    },
+    {
+      "type": "circle",
+      "box": [
+        84,
+        1505,
+        96,
+        96
+      ],
+      "seed": 78
+    },
+    {
+      "type": "circle",
+      "box": [
+        84,
+        1693,
+        96,
+        96
+      ],
+      "seed": 79
+    },
+    {
+      "type": "circle",
+      "box": [
+        84,
+        474,
+        96,
+        96
+      ],
+      "seed": 80
+    }
+  ]
+}

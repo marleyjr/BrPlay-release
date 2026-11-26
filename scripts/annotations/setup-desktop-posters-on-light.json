@@ -1,0 +1,26 @@
+{
+  "source": "setup-raw-posters-on-light.png",
+  "output": "ui/src/jvmMain/resources/onboarding/posters-on-light.webp",
+  "crop": [
+    1350,
+    0,
+    570,
+    570
+  ],
+  "width": 560,
+  "marks": [
+    {
+      "type": "arrow",
+      "from": [
+        1440,
+        540
+      ],
+      "to": [
+        1622,
+        330
+      ],
+      "bend": 0.25,
+      "seed": 45
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "source": "tv-home-dark.png",
+  "output": "site/public/screenshots/tv-rail.webp",
+  "crop": [
+    0,
+    0,
+    1200,
+    600
+  ],
+  "width": 960,
+  "marks": [
+    {
+      "type": "circle",
+      "box": [
+        84,
+        50,
+        830,
+        104
+      ],
+      "seed": 5
+    }
+  ]
+}

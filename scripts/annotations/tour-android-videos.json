@@ -1,0 +1,43 @@
+{
+  "source": "ph-tour-chats-light.png",
+  "output": "app/src/main/res/drawable-nodpi/tour_videos.webp",
+  "crop": [
+    0,
+    0,
+    1080,
+    2400
+  ],
+  "width": 720,
+  "marks": [
+    {
+      "type": "circle",
+      "box": [
+        70,
+        335,
+        1005,
+        168
+      ],
+      "seed": 61
+    },
+    {
+      "type": "circle",
+      "box": [
+        70,
+        1200,
+        520,
+        140
+      ],
+      "seed": 62
+    },
+    {
+      "type": "circle",
+      "box": [
+        655,
+        2212,
+        130,
+        116
+      ],
+      "seed": 63
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "source": "tvt-player.png",
+  "output": "app/src/main/res/drawable-nodpi/tour_player_tv.webp",
+  "crop": [
+    0,
+    0,
+    1920,
+    1080
+  ],
+  "width": 1280,
+  "marks": [
+    {
+      "type": "circle",
+      "box": [
+        905,
+        906,
+        210,
+        46
+      ],
+      "seed": 87
+    },
+    {
+      "type": "circle",
+      "box": [
+        84,
+        988,
+        245,
+        50
+      ],
+      "seed": 88
+    },
+    {
+      "type": "circle",
+      "box": [
+        1410,
+        982,
+        222,
+        62
+      ],
+      "seed": 89
+    }
+  ]
+}

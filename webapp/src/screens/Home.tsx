@@ -1,0 +1,269 @@
+import { createEffect, createSignal, For, Index, lazy, Match, on, onCleanup, Show, Switch } from 'solid-js'
+import { A } from '@solidjs/router'
+import { ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons'
+import { call, errorText } from '../tg/rpc'
+import { onBackOnline } from '../net'
+import { t } from '../i18n'
+import { addedIds, addedMode, addedView, progress, resumes, settings, starredIds, watchedTick } from '../store'
+import { forgetGone } from '../goneVideos'
+import { Icon } from '../ui/Icon'
+import { useObservedCovers } from './promo'
+import { Card, ContinueCard, tileCard, useLeft, useProgress, useWarmDataCentres, videoCard, type CardData } from './VideoList'
+import { form } from '../form'
+import type { HomePage, HomeRow, HomeView } from '../tg/types'
+
+/** The TV layout's carousel, in the TV chunk (plan 8.5). */
+const TvHero = lazy(() => import('../tv').then((m) => ({ default: m.TvHero })))
+/** The phone's and the desktop's carousel (FeaturedCarousel), fetched with Home's first rows. */
+const Hero = lazy(() => import('./Hero').then((m) => ({ default: m.Hero })))
+
+/** Home as last drawn, so coming back to it paints at once while it is asked for again. */
+const [last, setLast] = createSignal<HomePage | null>(null)
+
+/**
+ * Home as the app fills it: Continue watching, Recently added across Home's chats, then a row
+ * for each starred chat, built in the worker by the app's own rules. Rows still waiting for
+ * Telegram hold their place; the first run, with nothing anywhere, points to Saved Messages.
+ */
+export function Home() {
+    const [error, setError] = createSignal<unknown>(null)
+    const [busy, setBusy] = createSignal(false)
+    const apply = (page: HomePage) => {
+        setLast(page)
+        setError(null)
+        // A video part way whose message is gone for good leaves the lists, and the page says so (HX21).
+        if (page.gone.length) void forgetGone(page.gone)
+    }
+
+    let abort: AbortController | null = null
+    onCleanup(() => abort?.abort())
+    const load = async () => {
+        abort?.abort()
+        const mine = (abort = new AbortController())
+        setBusy(true)
+        try {
+            const [left, seen] = await Promise.all([resumes(), progress()])
+            const view = { minBytes: settings().sizeMin, maxBytes: settings().sizeMax, ...seen, resumes: left, starred: [...starredIds()], added: addedView(), layout: homeLayout() }
+            apply(await call('home', [view], { signal: mine.signal, onEvent: (p) => void apply(p as HomePage) }))
+        } catch (e) {
+            if (!mine.signal.aborted) setError(e)
+        } finally {
+            if (abort === mine) setBusy(false)
+        }
+    }
+    // Asked again when the size limits, the stars, the added chats or Settings > Home change, as every list is.
+    createEffect(on(() => [settings().sizeMin, settings().sizeMax, [...starredIds()].join(), watchedTick(), addedMode(), [...(addedIds() ?? [])].join(), JSON.stringify(homeLayout())], load))
+    // Lost on the way: asked again once the connection is back.
+    onBackOnline(() => (error() || !last()?.settled) && load())
+
+    const page = () => last()
+    // Every row off in Settings > Home: Home says so and leads there, rather than standing blank.
+    const allOff = () => {
+        const l = homeLayout()
+        return !l.carousel && !l.continueWatching && !l.recentlyAdded && !l.starredRows
+    }
+    const firstRun = () => !allOff() && page()?.settled && !page()!.rows.length
+    return (
+        <>
+            {/* The app's Home opens on its mark and name, not on a heading (the page is still called Home). */}
+            <div class="home-head">
+                <h1 class="page-title home-title">
+                    <img class="home-mark" src="/icon.svg" alt="" width="28" height="28" />
+                    <span class="home-brand" aria-hidden="true">TMPlayer</span>
+                    <span class="visually-hidden">{t('browse.tab_home')}</span>
+                </h1>
+            </div>
+            <Show when={settings().carousel}>
+                <Show when={form() === 'tv'} fallback={<Hero rows={page()?.rows} />}>
+                    <TvHero rows={page()?.rows} />
+                </Show>
+            </Show>
+            <Show when={error() && !page()?.rows.length}>
+                <div class="notice error-notice">
+                    <p class="error">{errorText(error())}</p>
+                    <button class="link" type="button" onClick={load}>{t('common.try_again')}</button>
+                </div>
+            </Show>
+            <Show when={!page() && busy()}>
+                <Placeholder />
+                <Placeholder />
+            </Show>
+            <Show when={firstRun()}>
+                <div class="first-run">
+                    <h2>{t('home.first_title')}</h2>
+                    <p>{t('home.first_body')}</p>
+                    <p class="muted">{t('home.first_more')}</p>
+                    <Show when={page()!.selfId}>
+                        <A class="primary-link" href={`/chat/${page()!.selfId}`}>{t('home.first_open_saved')}</A>
+                    </Show>
+                </div>
+            </Show>
+            <Show when={allOff()}>
+                <div class="first-run">
+                    <h2>{t('home.off_title')}</h2>
+                    <p>{t('home.off_body')}</p>
+                    <A class="primary-link" href="/settings/home">{t('home.open_settings')}</A>
+                </div>
+            </Show>
+            <For each={page()?.rows ?? []}>
+                {(row) => (
+                    <Switch>
+                        {/* Recently added kept for the carousel alone: its row is off. */}
+                        <Match when={row.kind === 'recent' && !row.asRow}>{null}</Match>
+                        <Match when={row.kind === 'recent' && row.noneChosen}>
+                            <section class="home-row" aria-labelledby={`row-${row.key}`}>
+                                <div class="row-head">
+                                    <h2 class="row-title" id={`row-${row.key}`}>{t('home.row_recent_all')}</h2>
+                                </div>
+                                <div class="notice home-none-chosen">
+                                    <p>{t('home.none_added')}</p>
+                                    <A class="link" href="/added-chats" data-tv-first>{t('picker.choose_chats')}</A>
+                                </div>
+                            </section>
+                        </Match>
+                        <Match when={true}>
+                            <Row row={row} selfId={page()?.selfId ?? null} />
+                        </Match>
+                    </Switch>
+                )}
+            </For>
+        </>
+    )
+}
+
+/** Settings > Home as the worker reads it (HomeView.layout). */
+function homeLayout(): HomeView['layout'] {
+    const s = settings()
+    return { carousel: s.carousel, continueWatching: s.homeContinue, recentlyAdded: s.homeRecent, starredRows: s.homeStarred }
+}
+
+function rowTitle(row: HomeRow, selfId: number | null): string {
+    if (row.kind === 'continue') return t('home.row_continue')
+    if (row.kind === 'recent') return row.starredOnly ? t('home.row_recent') : t('home.row_recent_all')
+    return row.chatId === selfId ? t('chats.saved_messages') : (row.title ?? '')
+}
+
+/** Where a row's See all goes: a starred chat's own page, or Recently added's; null for a row without one. */
+function seeAllOf(row: HomeRow): string | null {
+    if (!row.hasMore) return null
+    if (row.kind === 'chat' && row.chatId != null) return `/chat/${row.chatId}`
+    if (row.kind === 'recent') return '/recent'
+    return null
+}
+
+function cardsOf(row: HomeRow): CardData[] {
+    if (row.kind === 'continue') return row.tiles.map((tile) => videoCard(tile.item))
+    return row.tiles.map((tile) => tileCard(tile, row.kind === 'recent'))
+}
+
+/** One row: its heading (a starred chat's opens the chat), and its cards in a strip that scrolls sideways. */
+function Row(props: { row: HomeRow; selfId: number | null }) {
+    let strip: HTMLUListElement | undefined
+    const [atStart, setAtStart] = createSignal(true)
+    const [atEnd, setAtEnd] = createSignal(false)
+    const progressOf = useProgress()
+    const leftOf = useLeft()
+    const cards = () => cardsOf(props.row)
+    useWarmDataCentres(() => cards().map((c) => c.item))
+    useObservedCovers(() => cards().map((c) => c.item))
+    const edges = () => {
+        if (!strip) return
+        setAtStart(strip.scrollLeft <= 1)
+        setAtEnd(strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 1)
+    }
+    createEffect(on(cards, () => queueMicrotask(edges)))
+    const scroll = (dir: 1 | -1) => strip?.scrollBy({ left: dir * strip.clientWidth * 0.9, behavior: 'smooth' })
+    const id = `row-${props.row.key}`
+    const seeAll = () => seeAllOf(props.row)
+    // Recently added's page says "in starred chats" as the row does, from its first frame.
+    const seeAllState = () => (props.row.kind === 'recent' ? { starredOnly: props.row.starredOnly } : undefined)
+    return (
+        <section class="home-row" aria-labelledby={id}>
+            <div class="row-head">
+                <h2 class="row-title" id={id}>
+                    <Show when={props.row.kind === 'chat' && props.row.chatId != null} fallback={rowTitle(props.row, props.selfId)}>
+                        <A class="row-link" href={`/chat/${props.row.chatId}`}>{rowTitle(props.row, props.selfId)}</A>
+                    </Show>
+                </h2>
+                <Show when={props.row.loaded}>
+                    <div class="row-arrows">
+                        <button class="round-button small" type="button" disabled={atStart()} aria-label={t('home.row_scroll_back')} title={t('home.row_scroll_back')} onClick={() => scroll(-1)}>
+                            <Icon icon={ArrowLeft01Icon} size={20} />
+                        </button>
+                        <button class="round-button small" type="button" disabled={atEnd()} aria-label={t('home.row_scroll_on')} title={t('home.row_scroll_on')} onClick={() => scroll(1)}>
+                            <Icon icon={ArrowRight01Icon} size={20} />
+                        </button>
+                    </div>
+                </Show>
+                {/* On a TV See all is the strip's last card instead (SeeAllCard), where Right past the last video lands. */}
+                <Show when={form() !== 'tv' && seeAll()}>
+                    <A class="link see-all" href={seeAll()!} state={seeAllState()}>{t('home.see_all')}</A>
+                </Show>
+            </div>
+            <Show when={props.row.loaded} fallback={<Strip continues={props.row.kind === 'continue' && form() !== 'tv'} />}>
+                <ul class="strip" classList={{ continues: props.row.kind === 'continue' && form() !== 'tv' }} ref={strip} onScroll={edges}>
+                    <For each={cards()}>
+                        {(c) => (
+                            <li>
+                                {/* Continue watching: a landscape card with how long is left, which plays at once. */}
+                                <Show when={props.row.kind === 'continue' && form() !== 'tv'} fallback={<Card card={c} progress={progressOf(c.item)} direct={props.row.kind === 'continue'} />}>
+                                    <ContinueCard item={c.item} left={leftOf(c.item)} />
+                                </Show>
+                            </li>
+                        )}
+                    </For>
+                    <Show when={form() === 'tv' && seeAll()}>
+                        <li>
+                            <SeeAllCard href={seeAll()!} state={seeAllState()} />
+                        </li>
+                    </Show>
+                </ul>
+            </Show>
+        </section>
+    )
+}
+
+/**
+ * A TV row's last card (the app's SeeAllTile): art the size of the row's posters, focused as they
+ * are, a chevron over "See all" in the accent on the surface tinted with it. No line under it.
+ */
+function SeeAllCard(props: { href: string; state?: { starredOnly: boolean } }) {
+    return (
+        <A class="card see-all-card" href={props.href} state={props.state}>
+            <div class="card-art see-all-art">
+                <Icon icon={ArrowRight01Icon} size={32} />
+                <span class="see-all-label">{t('home.see_all')}</span>
+            </div>
+        </A>
+    )
+}
+
+/** A row still waiting for Telegram, the height of a filled one, so nothing below moves when it fills. */
+function Strip(props: { continues?: boolean }) {
+    return (
+        <ul class="strip waiting" classList={{ continues: props.continues }} aria-hidden="true">
+            <Index each={Array(8)}>
+                {() => (
+                    <li>
+                        <div class={props.continues ? 'continue-art' : 'card-art'} />
+                        <Show when={props.continues} fallback={<div class="card-name">&nbsp;</div>}>
+                            <div class="continue-name">&nbsp;</div>
+                        </Show>
+                        <div class="card-facts">&nbsp;</div>
+                    </li>
+                )}
+            </Index>
+        </ul>
+    )
+}
+
+function Placeholder() {
+    return (
+        <section class="home-row" aria-hidden="true">
+            <div class="row-head">
+                <h2 class="row-title">&nbsp;</h2>
+            </div>
+            <Strip />
+        </section>
+    )
+}

@@ -1,0 +1,43 @@
+# Created by hand from the 1.24.0 release; regenerate for the current release before submitting.
+# Goes to winget-pkgs at manifests/t/TMPlayer/TMPlayer/<version>/
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+
+PackageIdentifier: TMPlayer.TMPlayer
+PackageVersion: 1.24.0
+PackageLocale: en-US
+Publisher: TMPlayer
+PublisherUrl: https://github.com/dracu-lah
+PublisherSupportUrl: https://github.com/dracu-lah/TMPlayer/issues
+Author: dracu-lah
+PackageName: TMPlayer
+PackageUrl: https://tmplayer.org
+License: GPL-3.0-or-later
+LicenseUrl: https://github.com/dracu-lah/TMPlayer/blob/main/LICENSE
+PrivacyUrl: https://tmplayer.org/privacy/
+ShortDescription: Watch the videos in your Telegram chats while they download. Unofficial, not affiliated with Telegram.
+Description: |-
+  TMPlayer plays the videos in your own Telegram chats and channels. It starts within seconds while
+  the file is still downloading, and seeking re-aims the download instead of waiting for it. Sign in
+  with a QR code or your phone number, browse each chat's videos as a poster grid, resume where you
+  stopped and go on to the next episode. Embedded subtitles and audio tracks play through the bundled
+  mpv. TMPlayer is an unofficial client built on TDLib: it is not made by or affiliated with
+  Telegram, and it needs your own Telegram account.
+Moniker: tmplayer
+Tags:
+- media-player
+- mpv
+- streaming
+- tdlib
+- telegram
+- video
+- video-player
+ReleaseNotes: |-
+  TMPlayer now speaks 21 languages (machine translated for now, corrections welcome on GitHub). Home
+  has rows, series get their own page, and search covers all your chats. Optional posters and
+  overviews come from TMDB, TVmaze and AniList, and subtitles can be found online through
+  OpenSubtitles. The player adds volume boost, a sleep timer, a "still watching?" check, subtitle and
+  audio delay, subtitle size and position, and simpler controls. Downloads can be removed after
+  watching. On desktop the QR sign in works in release builds, and there is a new About screen.
+ReleaseNotesUrl: https://github.com/dracu-lah/TMPlayer/releases/tag/v1.24.0
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0

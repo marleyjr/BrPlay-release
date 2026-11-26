@@ -1,0 +1,732 @@
+// Plan 8.5: the TV layout walked with keys only (the remote's arrows, OK and Back), at both TV
+// sizes: focus comes back to the item that was open after Back, after a menu and after a dialog.
+import { readFileSync } from 'node:fs'
+import { expect, test, type Page } from '@playwright/test'
+import { fakeCase } from './helpers'
+
+/** The layout set to TV and two chats starred, written where the app keeps them before it starts. */
+async function tv(page: Page) {
+    await page.goto('/__e2e/sizes')
+    await page.evaluate(
+        () =>
+            new Promise<void>((resolve, reject) => {
+                localStorage.setItem('tmplayer-layout', 'tv')
+                const open = indexedDB.open('tmplayer-app')
+                open.onupgradeneeded = () => open.result.createObjectStore('kv')
+                open.onerror = () => reject(open.error)
+                open.onsuccess = () => {
+                    const tx = open.result.transaction('kv', 'readwrite')
+                    const kv = tx.objectStore('kv')
+                    kv.put({ sizeMin: 0 }, 'settings')
+                    kv.put({ chatId: -1001, time: 1 }, 'star:-1001')
+                    kv.put({ chatId: -1002, time: 2 }, 'star:-1002')
+                    tx.oncomplete = () => (open.result.close(), resolve())
+                }
+            }),
+    )
+}
+
+/**
+ * How far, in px, `inner` sits from the middle of `outer` along one axis; with no `inner`, the words'
+ * row against the button's (0 when the button is a single centred row).
+ */
+const offCentre = (page: Page, outer: string, inner: string, axis: 'x' | 'y') =>
+    page.locator(outer).first().evaluate((el, [inner, axis]) => {
+        const mid = (r: DOMRect) => (axis === 'x' ? r.left + r.width / 2 : r.top + r.height / 2)
+        if (!inner) return getComputedStyle(el).display.endsWith('flex') && getComputedStyle(el).alignItems === 'center' ? 0 : 99
+        return Math.abs(mid(el.getBoundingClientRect()) - mid(el.querySelector(inner)!.getBoundingClientRect()))
+    }, [inner, axis] as const)
+
+/** What has the focus: its address, label or words. */
+const focused = (page: Page) =>
+    page.evaluate(() => {
+        const a = document.activeElement as HTMLElement | null
+        return a ? `${a.classList[0] ?? a.tagName}|${a.getAttribute('href') ?? a.getAttribute('aria-label') ?? ''}` : ''
+    })
+
+async function press(page: Page, key: string, times = 1) {
+    for (let i = 0; i < times; i++) {
+        await page.keyboard.press(key)
+        await page.waitForTimeout(150)
+    }
+}
+
+for (const size of [
+    { width: 1920, height: 1080 },
+    { width: 1280, height: 720 },
+]) {
+    test.describe(`TV layout at ${size.width} x ${size.height}`, () => {
+        test.skip(({ browserName }) => browserName !== 'chromium', 'the TV walk runs in Chromium')
+        test.use({ viewport: size })
+        test.beforeEach(async ({ page, context }) => {
+            await fakeCase(context)
+            await tv(page)
+        })
+
+        // The fake account's files are under 400 MB, so Home has no carousel and opens on its first card.
+        test('Home: no carousel to show opens on the first card, rows, OK opens the page on Play, Back returns to Play and then the card, Back goes to the bar', async ({ page }) => {
+            await page.goto('/')
+            await expect(page.locator('html')).toHaveAttribute('data-form', 'tv')
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            await expect(page.locator('.tv-hero')).toHaveCount(0)
+            await press(page, 'ArrowDown', 2)
+            await press(page, 'ArrowRight', 2)
+            const card = await focused(page)
+            expect(card).toContain('card|/video/')
+            // OK opens the video's page with the remote on Play, as the app's Open a video's page first.
+            await press(page, 'Enter')
+            await expect(page).toHaveURL(/\/video\//)
+            await expect.poll(() => focused(page)).toBe('detail-play|')
+            await expect(page.locator('.tv-bar, .detail-close:visible')).toHaveCount(0)
+            await press(page, 'Enter')
+            await expect(page).toHaveURL(/\/watch\//)
+            await press(page, 'Backspace')
+            await expect(page).toHaveURL(/\/video\//)
+            await expect.poll(() => focused(page)).toBe('detail-play|')
+            await press(page, 'Backspace')
+            await expect(page).toHaveURL(/\/$/)
+            await expect.poll(() => focused(page)).toBe(card)
+            // The remote's Play key plays a card at once, past its page.
+            await press(page, 'MediaPlayPause')
+            await expect(page).toHaveURL(/\/watch\//)
+            await press(page, 'Backspace')
+            await expect(page).toHaveURL(/\/$/)
+            await expect.poll(() => focused(page)).toBe(card)
+            await press(page, 'Escape')
+            expect(await focused(page)).toBe('tv-tab|/')
+            // Up from the bar goes nowhere; Down goes back into the page where the remote was.
+            await press(page, 'ArrowUp')
+            expect(await focused(page)).toBe('tv-tab|/')
+        })
+
+        test('Chats and a chat: the bar keeps the remote, a chat opens on its first card, the sort menu and Back', async ({ page }) => {
+            await page.goto('/')
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            await press(page, 'ArrowUp')
+            await press(page, 'ArrowRight')
+            await press(page, 'Enter')
+            await expect(page).toHaveURL(/\/chats$/)
+            await expect.poll(() => focused(page)).toBe('tv-tab|/chats')
+            await press(page, 'ArrowDown', 2)
+            await press(page, 'ArrowRight', 2)
+            const row = await focused(page)
+            expect(row).toBe('chat-link|/chat/-1001')
+            await press(page, 'Enter')
+            await expect(page).toHaveURL(/\/chat\/-1001/)
+            await expect.poll(() => focused(page)).toContain('card|/video/-1001/')
+            // Up from the first card is Back; Right passes the title to the chat's star, then Sort.
+            await press(page, 'ArrowUp')
+            expect(await focused(page)).toBe('round-button|Back')
+            await press(page, 'ArrowRight', 2)
+            expect(await focused(page)).toContain('Sort')
+            await press(page, 'Enter')
+            await press(page, 'ArrowDown')
+            expect(await page.evaluate(() => !!document.activeElement?.closest('[role=menu]'))).toBe(true)
+            await press(page, 'Backspace')
+            await expect(page.locator('[role=menu]')).toHaveCount(0)
+            expect(await focused(page)).toContain('Sort')
+            await press(page, 'Backspace')
+            await expect(page).toHaveURL(/\/chats$/)
+            await expect.poll(() => focused(page)).toBe(row)
+        })
+
+        test('Choose chats: the bar holds a button on Chats only, OK opens the picker on its page, Back returns the remote to the button', async ({ page }) => {
+            await page.goto('/')
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            await press(page, 'ArrowUp')
+            await press(page, 'ArrowRight')
+            await press(page, 'Enter')
+            await expect(page).toHaveURL(/\/chats$/)
+            await expect.poll(() => focused(page)).toBe('tv-tab|/chats')
+            await press(page, 'ArrowRight')
+            expect(await focused(page)).toBe('choose-chats|/added-chats')
+            await expect(page.locator('.list-head .choose-chats')).toHaveCount(0)
+            await press(page, 'Enter')
+            await expect(page).toHaveURL(/\/added-chats$/)
+            // The picker takes the remote, not the bar.
+            await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('.page'))).toBe(true)
+            await press(page, 'Backspace')
+            await expect(page).toHaveURL(/\/chats$/)
+            await expect.poll(() => focused(page)).toBe('choose-chats|/added-chats')
+            await press(page, 'ArrowLeft')
+            expect(await focused(page)).toBe('tv-tab|/chats')
+            // Home has none, and its first focus stays on the content.
+            await page.goto('/')
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            await expect(page.locator('.tv-bar .choose-chats')).toHaveCount(0)
+        })
+
+        test('Settings: a choice is made with OK, not by moving; Sign out asks, Back closes the question onto it', async ({ page }) => {
+            await page.goto('/')
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            await press(page, 'ArrowUp')
+            await press(page, 'ArrowLeft', 3)
+            await press(page, 'Enter')
+            await expect(page).toHaveURL(/\/settings$/)
+            await expect.poll(() => focused(page)).toContain('tv-picture')
+            // Down to the theme's choices (Chosen chats stands above them since HX27).
+            const onTheme = () => page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name === 'theme')
+            for (let i = 0; i < 6 && !(await onTheme()); i++) await press(page, 'ArrowDown')
+            expect(await onTheme()).toBe(true)
+            await press(page, 'ArrowRight')
+            expect(await page.evaluate(() => document.documentElement.dataset.theme ?? 'system')).toBe('system')
+            await press(page, 'Enter')
+            expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark')
+            for (let i = 0; i < 30 && !(await focused(page)).includes('danger-button'); i++) await press(page, 'ArrowDown')
+            expect(await focused(page)).toContain('danger-button')
+            // Its icon beside the words, not on a line above them (the TV's Settings is not .set).
+            expect(await offCentre(page, '.danger-button', 'svg', 'y')).toBeLessThanOrEqual(1)
+            expect(await offCentre(page, '.outline-button', '', 'y')).toBe(0)
+            await press(page, 'Enter')
+            await expect(page.locator('dialog[open]')).toHaveCount(1)
+            expect(await page.evaluate(() => !!document.activeElement?.closest('dialog[open]'))).toBe(true)
+            await press(page, 'Backspace')
+            await expect(page.locator('dialog[open]')).toHaveCount(0)
+            expect(await focused(page)).toContain('danger-button')
+        })
+
+        test('Settings: choosing Desktop with the remote takes the TV bar and keys away at once', async ({ page }) => {
+            await page.goto('/settings')
+            await expect.poll(() => focused(page)).not.toBe('')
+            for (let i = 0; i < 6 && !(await focused(page)).startsWith('INPUT|'); i++) await press(page, 'ArrowDown')
+            await press(page, 'ArrowDown')
+            for (let i = 0; i < 4 && (await page.evaluate(() => document.activeElement?.closest('label')?.textContent?.trim())) !== 'Desktop'; i++) await press(page, 'ArrowLeft')
+            await press(page, 'Enter')
+            await expect(page.locator('html')).toHaveAttribute('data-form', 'desktop')
+            await expect(page.locator('.tv-bar')).toHaveCount(0)
+            await expect(page.locator('nav.nav')).toBeVisible()
+            expect(await page.evaluate(() => document.documentElement.dataset.tvKeys)).toBeUndefined()
+        })
+
+        // ---- The player (session 21): everything with the remote's keys ----
+
+        /** Opens a chat's first card with the remote and waits for the picture to play. */
+        async function watch(page: Page, chat: string) {
+            await page.goto(`/chat/${chat}`)
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            await press(page, 'Enter')
+            await expect.poll(() => focused(page)).toBe('detail-play|')
+            await press(page, 'Enter')
+            await expect(page).toHaveURL(/\/watch\//)
+            await expect(page.locator('.pc[data-variant=tv]')).toHaveCount(1)
+            await expect.poll(() => page.locator('video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0.2)
+        }
+        const controlsUp = (page: Page) => page.evaluate(() => document.querySelector('.pc')?.classList.contains('shown') ?? false)
+        const paused = (page: Page) => page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)
+        const onControl = (page: Page) =>
+            page.evaluate(() => {
+                const a = document.activeElement as HTMLElement | null
+                if (!a) return ''
+                if (a.getAttribute('role') === 'slider') return 'bar'
+                if (a.classList.contains('pc-play')) return 'disc'
+                return a.getAttribute('aria-label') ?? a.textContent?.trim() ?? a.tagName
+            })
+        /** A key the TV sends by code alone (webOS Back 461, Pause 19, Play 415). */
+        const code = (page: Page, keyCode: number, key = 'Unidentified') =>
+            page.evaluate(([c, k]) => (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: k as string, keyCode: c as number, bubbles: true, cancelable: true })), [keyCode, key])
+
+        test('Player: the picture starts bare, Left jumps, Up raises the row on the bar, Back peels the row and then the video', async ({ page }) => {
+            await page.goto('/chat/-1001')
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            const card = await focused(page)
+            await press(page, 'Enter')
+            await expect.poll(() => focused(page)).toBe('detail-play|')
+            await press(page, 'Enter')
+            await expect(page).toHaveURL(/\/watch\//)
+            await expect(page.locator('.pc[data-variant=tv]')).toHaveCount(1)
+            expect(await controlsUp(page)).toBe(false)
+            // Left over the bare picture (the test clip is 4 s long): ten seconds at once, the figure on the left, no row.
+            await press(page, 'ArrowLeft')
+            await expect(page.locator('.pc-ripple.left')).toBeVisible()
+            expect(await controlsUp(page)).toBe(false)
+            await press(page, 'ArrowUp')
+            expect(await controlsUp(page)).toBe(true)
+            expect(await onControl(page)).toBe('bar')
+            // Back puts the row away, the next Back leaves the video for its page, the next the page, and the card has the remote again.
+            await press(page, 'Backspace')
+            expect(await controlsUp(page)).toBe(false)
+            await expect(page).toHaveURL(/\/watch\//)
+            await press(page, 'Backspace')
+            await expect(page).toHaveURL(/\/video\//)
+            await expect.poll(() => focused(page)).toBe('detail-play|')
+            await press(page, 'Backspace')
+            await expect(page).toHaveURL(/\/chat\/-1001$/)
+            await expect.poll(() => focused(page)).toBe(card)
+        })
+
+        test('An uncaught failure: on a page the card takes the remote; in the player, its own sheet, and only if the video is stuck', async ({ page }) => {
+            // On a page: the card, Left and Right walk its buttons, Back closes it (HX19).
+            await page.goto('/chat/-1001')
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            await page.evaluate(() => setTimeout(() => { throw new Error('e2e uncaught') }))
+            await expect(page.locator('.crash-card')).toBeVisible()
+            await expect.poll(() => page.evaluate(() => document.activeElement?.textContent)).toBe('Reload')
+            await press(page, 'ArrowRight')
+            expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('Close')
+            await press(page, 'ArrowLeft')
+            expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('Reload')
+            await press(page, 'Backspace')
+            await expect(page.locator('.crash-card')).toHaveCount(0)
+            await expect(page).toHaveURL(/\/chat\/-1001$/)
+
+            // In the player, while the picture moves on: nothing over it, as the Mi TV's 3D video that played fine.
+            await watch(page, '-1001')
+            await page.locator('video').evaluate((v: HTMLVideoElement) => (v.loop = true))
+            await page.evaluate(() => setTimeout(() => { throw new Error('e2e uncaught') }))
+            await page.waitForTimeout(9_000)
+            await expect(page.locator('.crash-card')).toHaveCount(0)
+            await expect(page.locator('.pc-status')).toHaveCount(0)
+            expect(await paused(page)).toBe(false)
+
+            // Stuck (the picture does not move): the player's own status sheet, never the card.
+            await page.locator('video').evaluate((v: HTMLVideoElement) => (v.playbackRate = 0))
+            await page.evaluate(() => setTimeout(() => { throw new Error('e2e uncaught') }))
+            await expect(page.locator('.pc-status')).toBeVisible({ timeout: 12_000 })
+            await expect(page.locator('.crash-card')).toHaveCount(0)
+            await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('.pc-status'))).toBe(true)
+        })
+
+        test('Player: OK pauses with the remote on the disc, arrows walk disc, bar and buttons, menus close back onto their button', async ({ page }) => {
+            await watch(page, '-1001')
+            await press(page, 'Enter')
+            await expect.poll(() => paused(page)).toBe(true)
+            expect(await controlsUp(page)).toBe(true)
+            expect(await onControl(page)).toBe('disc')
+            // The glyph in the middle of its disc: the TV's text-pill padding on button.tonal pushed it 7 px right.
+            expect(await offCentre(page, '.pc-play', '.pc-play-glyph', 'x')).toBeLessThanOrEqual(1)
+            // OK on the disc plays again (the 4 s test clip loops so the walk below has time).
+            await press(page, 'Enter')
+            await expect.poll(() => paused(page)).toBe(false)
+            await page.locator('video').evaluate((v: HTMLVideoElement) => (v.loop = true))
+            await press(page, 'ArrowDown')
+            expect(await onControl(page)).toBe('bar')
+            // On the bar Left seeks at once.
+            await press(page, 'ArrowLeft')
+            await expect.poll(() => page.locator('video').evaluate((v: HTMLVideoElement) => v.currentTime)).toBeLessThan(1)
+            await press(page, 'ArrowDown')
+            expect(await onControl(page)).toBe('Subtitles')
+            await press(page, 'ArrowRight')
+            expect(await onControl(page)).toBe('Audio')
+            await press(page, 'Enter')
+            await expect(page.locator('.pc-menu')).toHaveCount(1)
+            expect(await page.evaluate(() => !!document.activeElement?.closest('.pc-menu'))).toBe(true)
+            await press(page, 'Backspace')
+            await expect(page.locator('.pc-menu')).toHaveCount(0)
+            expect(await onControl(page)).toBe('Audio')
+            await press(page, 'ArrowRight')
+            expect(await onControl(page)).toBe('Playback speed')
+            await press(page, 'Enter')
+            await press(page, 'ArrowDown', 4)
+            await press(page, 'Enter')
+            await expect(page.locator('.pc-menu')).toHaveCount(0)
+            expect(await page.locator('video').evaluate((v: HTMLVideoElement) => v.playbackRate)).toBe(1.5)
+            expect(await onControl(page)).toBe('Playback speed')
+            // Shape steps with a press and More opens its side panel, both reached with the arrows.
+            await press(page, 'ArrowRight')
+            expect(await onControl(page)).toContain('Picture shape')
+            await press(page, 'Enter')
+            expect(await onControl(page)).toContain('Picture shape: Fill')
+            await press(page, 'ArrowRight')
+            expect(await onControl(page)).toBe('More')
+            await press(page, 'Enter')
+            await expect(page.locator('.pc-panel')).toHaveCount(1)
+            expect(await page.evaluate(() => !!document.activeElement?.closest('.pc-panel'))).toBe(true)
+            await press(page, 'Backspace')
+            expect(await onControl(page)).toBe('More')
+            // Up from the buttons is the bar, Up again the disc; Back puts the row away.
+            await press(page, 'ArrowUp')
+            expect(await onControl(page)).toBe('bar')
+            await press(page, 'ArrowUp')
+            expect(await onControl(page)).toBe('disc')
+            await press(page, 'Backspace')
+            expect(await controlsUp(page)).toBe(false)
+        })
+
+        test('Player: Episodes opens on the playing one, Down and OK start the next, Back closes it onto its pill', async ({ page }) => {
+            await watch(page, '-1002')
+            await press(page, 'ArrowUp')
+            await press(page, 'ArrowDown')
+            // Right along the row to the Episodes pill.
+            for (let i = 0; i < 8 && (await onControl(page)) !== 'Episodes'; i++) await press(page, 'ArrowRight')
+            expect(await onControl(page)).toBe('Episodes')
+            await press(page, 'Enter')
+            await expect(page.locator('.pc-episodes')).toBeVisible()
+            expect(await page.evaluate(() => document.activeElement?.classList.contains('playing'))).toBe(true)
+            await press(page, 'Backspace')
+            await expect(page.locator('.pc-episodes')).toHaveCount(0)
+            expect(await onControl(page)).toBe('Episodes')
+            await press(page, 'Enter')
+            const first = page.url()
+            await press(page, 'ArrowDown')
+            expect(await page.evaluate(() => document.activeElement?.classList.contains('pc-episode'))).toBe(true)
+            await press(page, 'Enter')
+            await expect(page.locator('.pc-episodes')).toHaveCount(0)
+            await expect.poll(() => page.url()).not.toBe(first)
+        })
+
+        test('Player: the media keys by code (Pause 19, Play 415, Rewind 412, Back 461) work without a name', async ({ page }) => {
+            await watch(page, '-1001')
+            await code(page, 19)
+            await expect.poll(() => paused(page)).toBe(true)
+            expect(await onControl(page)).toBe('disc')
+            await code(page, 415)
+            await expect.poll(() => paused(page)).toBe(false)
+            await page.locator('video').evaluate((v: HTMLVideoElement) => (v.loop = true))
+            await code(page, 412)
+            await expect(page.locator('.pc-ripple.left')).toBeVisible()
+            // Back peels the row first (it is up for a few seconds after a key), then leaves.
+            const rowUp = await controlsUp(page)
+            await code(page, 461, 'GoBack')
+            if (rowUp) await code(page, 461, 'GoBack')
+            await expect(page).toHaveURL(/\/video\/-1001\//)
+        })
+
+        test('Player: a file that needs the app puts the remote on its sheet, and Back leaves', async ({ page }) => {
+            await page.goto('/chat/-1001')
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            // Toward the WMV with the arrows, whatever the columns: the sponsored card after the third video breaks the first row.
+            for (let i = 0; i < 30; i++) {
+                const way = await page.evaluate(() => {
+                    const at = document.activeElement
+                    const goal = [...document.querySelectorAll('a.card')].find((c) => c.textContent?.includes('Windows Clip'))
+                    if (!at || !goal || at === goal) return ''
+                    const f = at.getBoundingClientRect()
+                    const g = goal.getBoundingClientRect()
+                    if (g.top >= f.bottom) return 'ArrowDown'
+                    if (g.bottom <= f.top) return 'ArrowUp'
+                    return g.left > f.left ? 'ArrowRight' : 'ArrowLeft'
+                })
+                if (!way) break
+                await press(page, way)
+            }
+            expect(await focused(page)).toBe('card|/video/-1001/11')
+            await press(page, 'Enter')
+            await expect.poll(() => focused(page)).toBe('detail-play|')
+            await press(page, 'Enter')
+            await expect(page.getByText('This video needs the TMPlayer app')).toBeVisible({ timeout: 30_000 })
+            expect(await page.evaluate(() => !!document.activeElement?.closest('.pc-status'))).toBe(true)
+            await press(page, 'Backspace')
+            await expect(page).toHaveURL(/\/video\/-1001\/11/)
+        })
+
+        test('Player: a paused picture with the row away stops the page\'s own timers', async ({ page }) => {
+            await watch(page, '-1001')
+            await code(page, 19)
+            await press(page, 'Backspace')
+            expect(await controlsUp(page)).toBe(false)
+            // The container's own idle flag settles a few seconds after the last key; after that the save and
+            // stall timers are cleared by the pause and nothing the page owns wakes in the next 2.5 s.
+            await page.waitForTimeout(5000)
+            const woke = await page.evaluate(
+                () =>
+                    new Promise<string[]>((resolve) => {
+                        const seen: string[] = []
+                        const mo = new MutationObserver((list) => list.forEach((m) => seen.push(`${m.type}:${(m.target as HTMLElement).className ?? ''}:${m.attributeName ?? ''}`)))
+                        mo.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true })
+                        setTimeout(() => (mo.disconnect(), resolve(seen)), 2500)
+                    }),
+            )
+            expect(woke).toEqual([])
+        })
+
+        test('Search: the field opens for typing on OK only, Down goes to the results, Up to the bar', async ({ page }) => {
+            await page.goto('/search')
+            await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
+            expect(await page.evaluate(() => (document.activeElement as HTMLInputElement).readOnly)).toBe(true)
+            await press(page, 'Enter')
+            await page.keyboard.type('Clip')
+            await expect(page).toHaveURL(/q=Clip/)
+            await expect(page.locator('.card').first()).toBeVisible()
+            await press(page, 'ArrowDown')
+            expect(await focused(page)).toContain('card|/video/')
+            await press(page, 'ArrowUp')
+            expect(await focused(page)).toBe('INPUT|Search videos and chats')
+            await press(page, 'ArrowUp')
+            expect(await focused(page)).toBe('tv-tab|/search')
+        })
+
+        test('A notice with buttons never takes the remote, but Up from the bar and Down from the foot reach it, and Back, Down or closing it gives the remote back (HX22)', async ({ page }) => {
+            await page.goto('/')
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            await press(page, 'ArrowUp')
+            await press(page, 'ArrowRight')
+            await press(page, 'Enter')
+            await expect.poll(() => focused(page)).toBe('tv-tab|/chats')
+            const barItem = await focused(page)
+            await page.evaluate(() => (window as unknown as { __e2eUpdateReady: () => void }).__e2eUpdateReady())
+            await expect(page.locator('.update-notice')).toBeVisible()
+            const inNotice = () => page.evaluate(() => !!document.activeElement?.closest('.update-notice'))
+            const words = () => page.evaluate(() => document.activeElement?.textContent ?? '')
+            // It came up without taking the remote.
+            expect(await focused(page)).toBe(barItem)
+            // Up from the bar: into it, on its first button. Left and Right walk its two buttons.
+            await press(page, 'ArrowUp')
+            expect(await inNotice()).toBe(true)
+            expect(await words()).toBe('Later')
+            await press(page, 'ArrowRight')
+            expect(await words()).toBe('Reload')
+            await press(page, 'ArrowLeft')
+            expect(await words()).toBe('Later')
+            // Back: the remote is back on the bar's item it came from, and the page did not move.
+            await press(page, 'Backspace')
+            expect(await focused(page)).toBe(barItem)
+            await expect(page).toHaveURL(/\/chats$/)
+            // Down from the bar goes into the page, not the notice.
+            await press(page, 'ArrowDown')
+            expect(await inNotice()).toBe(false)
+            expect(await focused(page)).not.toBe(barItem)
+            // A chat of a few cards: Down from its last row reaches the notice at the foot.
+            await page.goto('/chat/-1002')
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            await page.evaluate(() => (window as unknown as { __e2eUpdateReady: () => void }).__e2eUpdateReady())
+            await expect(page.locator('.update-notice')).toBeVisible()
+            for (let i = 0; i < 30 && !(await inNotice()); i++) await press(page, 'ArrowDown')
+            expect(await inNotice()).toBe(true)
+            // Up, the way the remote came, goes back onto the page's last item.
+            await press(page, 'ArrowUp')
+            expect(await inNotice()).toBe(false)
+            const last = await focused(page)
+            await press(page, 'ArrowDown')
+            expect(await inNotice()).toBe(true)
+            // OK on Later: the notice goes, and the remote is back where it was.
+            await press(page, 'Enter')
+            await expect(page.locator('.update-notice')).toHaveCount(0)
+            await expect.poll(() => focused(page)).toBe(last)
+        })
+
+        test('A toast\'s Undo is reached from the bar, stays up while the remote is on it, and OK undoes (HX22)', async ({ page }) => {
+            await page.evaluate(
+                () =>
+                    new Promise<void>((resolve, reject) => {
+                        const open = indexedDB.open('tmplayer-app')
+                        open.onerror = () => reject(open.error)
+                        open.onsuccess = () => {
+                            const tx = open.result.transaction('kv', 'readwrite')
+                            tx.objectStore('kv').put(1, 'watched:-1001:1')
+                            tx.oncomplete = () => (open.result.close(), resolve())
+                        }
+                    }),
+            )
+            await page.goto('/settings')
+            await expect.poll(() => focused(page)).not.toBe('')
+            const on = () => page.evaluate(() => document.activeElement?.getAttribute('aria-labelledby') ?? '')
+            for (let i = 0; i < 40 && (await on()) !== 'history-label'; i++) await press(page, 'ArrowDown')
+            expect(await on()).toBe('history-label')
+            await press(page, 'Enter')
+            await expect(page.locator('.toast button')).toBeVisible()
+            // The toast never takes the remote.
+            expect(await on()).toBe('history-label')
+            await press(page, 'Backspace')
+            const barItem = await focused(page)
+            await press(page, 'ArrowUp')
+            expect(await page.evaluate(() => !!document.activeElement?.closest('.toast'))).toBe(true)
+            // Past its 8 s, it stays while the remote is on it.
+            await page.waitForTimeout(9_000)
+            await expect(page.locator('.toast button')).toBeVisible()
+            await press(page, 'Enter')
+            await expect(page.locator('.toast')).toHaveCount(0)
+            await expect.poll(() => focused(page)).toBe(barItem)
+            const back = await page.evaluate(
+                () =>
+                    new Promise<unknown>((resolve) => {
+                        const open = indexedDB.open('tmplayer-app')
+                        open.onsuccess = () => {
+                            const get = open.result.transaction('kv').objectStore('kv').get('watched:-1001:1')
+                            get.onsuccess = () => (open.result.close(), resolve(get.result))
+                        }
+                    }),
+            )
+            expect(back).toBe(1)
+        })
+
+        test('keys only, every screen: the remote lands on something, never falls to the page, and Back always gets out', async ({ page }) => {
+            test.setTimeout(150_000)
+            const onBody = () => page.evaluate(() => !document.activeElement || document.activeElement === document.body || document.activeElement === document.documentElement)
+            for (const path of ['/', '/chats', '/chat/-1001', '/video/-1001/1', '/search', '/settings', '/history', '/history/later', '/history/watched']) {
+                await page.goto(path)
+                await expect(page.locator('html')).toHaveAttribute('data-form', 'tv')
+                await expect.poll(() => onBody(), { message: `${path}: focus starts on a control` }).toBe(false)
+                const seen = new Set<string>([await focused(page)])
+                for (const key of ['ArrowDown', 'ArrowDown', 'ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowRight', 'ArrowDown', 'ArrowUp', 'ArrowUp', 'ArrowLeft', 'ArrowLeft']) {
+                    await press(page, key)
+                    expect(await onBody(), `${path}: ${key} dropped the focus`).toBe(false)
+                    seen.add(await focused(page))
+                }
+                expect(seen.size, `${path}: the arrows reach more than one control`).toBeGreaterThan(1)
+                // Back, over and over, leaves every screen for the bar and stays there.
+                for (let i = 0; i < 6; i++) await press(page, 'Backspace')
+                expect(await onBody(), `${path}: Back dropped the focus`).toBe(false)
+            }
+        })
+    })
+}
+
+test.describe('TV sign in', () => {
+    test.skip(({ browserName }) => browserName !== 'chromium', 'the TV walk runs in Chromium')
+    test.use({ viewport: { width: 1920, height: 1080 } })
+    test.beforeEach(async ({ page, context }) => {
+        await fakeCase(context, 'signedout')
+        await tv(page)
+    })
+
+    test('the QR code first, the number by the pad and the remote\'s number keys, no field takes the keyboard', async ({ page }) => {
+        await page.goto('/')
+        await expect(page).toHaveURL(/\/signin/)
+        await expect(page.locator('.signin.is-qr .qr')).toBeVisible()
+        // Down to "Use my phone number", OK: the pad takes the remote on its first digit.
+        for (let i = 0; i < 6 && !(await page.evaluate(() => document.activeElement?.textContent === 'Use my phone number')); i++) await press(page, 'ArrowDown')
+        await press(page, 'Enter')
+        await expect(page.locator('.keypad')).toBeVisible()
+        expect(await focused(page)).toBe('key|')
+        const field = page.getByRole('textbox', { name: 'Phone number' })
+        expect(await field.evaluate((el: HTMLInputElement) => el.readOnly)).toBe(true)
+        // 5 then 7 by the pad (Right, OK); 3 by the remote's number key; Delete takes the last away.
+        await press(page, 'ArrowDown')
+        await press(page, 'ArrowRight')
+        expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('5')
+        await press(page, 'Enter')
+        await press(page, 'ArrowDown')
+        await press(page, 'ArrowLeft')
+        expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('7')
+        await press(page, 'Enter')
+        await page.keyboard.press('3')
+        await expect(field).toHaveValue(/573/)
+        await press(page, 'ArrowDown')
+        expect(await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('Delete')
+        await press(page, 'Enter')
+        await expect(field).toHaveValue(/57$/)
+        // No editable field is ever the one the remote is on.
+        expect(await page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.readOnly ?? true)).toBe(true)
+    })
+})
+
+// HX18: the TV layout's alignment, measured, at both TV sizes.
+const PICTURE = readFileSync(new URL('./media/thumb.jpg', import.meta.url))
+
+/** A /tmdb worker that matches every title with a poster, a wide picture and an overview, so Recently added fills the carousel. */
+async function everyTitleMatched(page: Page) {
+    await page.route('**/tmdb/**', (route) => {
+        const path = new URL(route.request().url()).pathname
+        if (path === '/tmdb/poster') return route.fulfill({ json: { match: true, id: '77', kind: 'film', title: 'Harbour Notes', year: 2019, poster: '/p0.jpg', backdrop: '/w0.jpg', overview: 'A harbour town keeps its notes.' } })
+        if (path.startsWith('/tmdb/img/')) return route.fulfill({ contentType: 'image/jpeg', body: PICTURE })
+        return route.fulfill({ json: { found: false } })
+    })
+}
+
+const box = (page: Page, selector: string) => page.locator(selector).first().evaluate((el) => el.getBoundingClientRect().toJSON() as DOMRect)
+const mid = (r: DOMRect) => r.top + r.height / 2
+
+for (const size of [
+    { width: 1920, height: 1080 },
+    { width: 1280, height: 720 },
+]) {
+    test.describe(`TV alignment at ${size.width} x ${size.height}`, () => {
+        test.skip(({ browserName }) => browserName !== 'chromium', 'the TV walk runs in Chromium')
+        test.use({ viewport: size })
+
+        test('Home carousel: Play and Details are one height on one middle, the dots on it, and the title\'s wide picture is up', async ({ page, context }) => {
+            await fakeCase(context, 'big')
+            await everyTitleMatched(page)
+            await tv(page)
+            await page.goto('/')
+            await expect(page.locator('.tv-hero-play')).toBeVisible()
+            const play = await box(page, '.tv-hero-play')
+            const pill = await box(page, '.tv-hero-pill')
+            const dot = await box(page, '.tv-hero-dots span')
+            // Heights as laid out (the remote's focus only swaps the fill, so nothing moves).
+            const tall = (sel: string) => page.locator(sel).first().evaluate((el) => (el as HTMLElement).offsetHeight)
+            expect(await tall('.tv-hero-play')).toBe(await tall('.tv-hero-pill'))
+            expect(Math.abs(mid(play) - mid(pill))).toBeLessThan(1)
+            expect(Math.abs(mid(play) - mid(dot))).toBeLessThan(1.5)
+            // The page's picture is drawn, never a blank dark area.
+            await expect(page.locator('.tv-hero-art img')).toHaveCount(1)
+            await expect(page.locator('.tv-hero-art.cover')).toHaveCount(0)
+            // Details opens the page's video, and Back puts the remote on Details again, not on that video's card below.
+            for (let i = 0; i < 4 && !(await focused(page)).startsWith('tv-hero-play|'); i++) await press(page, 'ArrowUp')
+            await press(page, 'ArrowRight')
+            const details = await focused(page)
+            expect(details).toContain('tv-hero-pill|/video/')
+            await press(page, 'Enter')
+            await expect(page).toHaveURL(/\/video\//)
+            await press(page, 'Backspace')
+            await expect(page).toHaveURL(/\/$/)
+            await expect.poll(() => focused(page)).toBe(details)
+        })
+
+        test('Recently added: Right past the last card lands on See all, a card of the row\'s size, and OK opens the page, which reads on', async ({ page, context }) => {
+            test.setTimeout(60_000)
+            await fakeCase(context, 'manyrecent')
+            await tv(page)
+            await page.goto('/')
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            // The heading keeps no See all of its own on a TV.
+            await expect(page.locator('.row-head .see-all')).toHaveCount(0)
+            const end = page.locator('.home-row').first().locator('.see-all-card')
+            await expect(end).toHaveAttribute('href', '/recent')
+            // Sizes as laid out: the focused first card is grown by the focus.
+            const dims = (el: Element) => [(el as HTMLElement).offsetWidth, (el as HTMLElement).offsetHeight]
+            const art = await end.locator('.card-art').evaluate(dims)
+            const other = await page.locator('.home-row').first().locator('.card:not(.see-all-card) .card-art').last().evaluate(dims)
+            expect(art).toEqual(other)
+            for (let i = 0; i < 12 && !(await focused(page)).startsWith('card|/recent'); i++) await press(page, 'ArrowRight')
+            expect(await focused(page)).toBe('card|/recent')
+            // In sight once the remote is on it: the strip scrolled to it.
+            const box = (await end.boundingBox())!
+            expect(box.x + box.width).toBeLessThanOrEqual(size.width)
+            await press(page, 'Enter')
+            await expect(page).toHaveURL(/\/recent$/)
+            await expect(page.locator('.title-pill')).toContainText('Recently added')
+            await expect.poll(() => focused(page)).toContain('card|/video/')
+            // Down a few rows moves through the grid; scrolled to its foot, it reads on to the oldest video.
+            await press(page, 'ArrowDown', 3)
+            expect(await focused(page)).toContain('card|/video/')
+            await expect
+                .poll(
+                    async () => {
+                        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+                        await page.waitForTimeout(200)
+                        return page.locator('.vgrid .card', { hasText: 'Native Clip' }).count()
+                    },
+                    { timeout: 25_000 },
+                )
+                .toBeGreaterThan(0)
+        })
+
+        test('a chat whose cards take seconds to come still opens on its first card, not on Back', async ({ page, context }) => {
+            await fakeCase(context, 'slow')
+            await tv(page)
+            await page.goto('/chat/-1001')
+            await expect.poll(() => focused(page), { timeout: 15_000 }).toContain('card|/video/')
+        })
+
+        test('Sign in: the two-step password column is in the middle of the screen', async ({ page, context }) => {
+            await fakeCase(context, 'signedout', 'password')
+            await tv(page)
+            await page.goto('/')
+            await expect(page.locator('input[type=password]')).toBeVisible()
+            for (const sel of ['.password-field', '.signin form button.primary']) {
+                const r = await box(page, sel)
+                expect(Math.abs(r.left - (size.width - r.right)), sel).toBeLessThan(1)
+            }
+        })
+
+        test('Sign in: the QR code beside its words, all of it on the screen, its two buttons one height', async ({ page, context }) => {
+            await fakeCase(context, 'signedout')
+            await tv(page)
+            await page.goto('/')
+            await expect(page.locator('.signin.is-qr .qr')).toBeVisible()
+            const plate = await box(page, '.qr')
+            const words = await box(page, '.signin.is-qr h1')
+            expect(plate.right).toBeLessThan(words.left)
+            for (const sel of ['.signin-brand', '.qr', '.signin-foot']) {
+                const r = await box(page, sel)
+                expect(r.top, sel).toBeGreaterThanOrEqual(0)
+                expect(r.bottom, sel).toBeLessThanOrEqual(size.height)
+            }
+            const phone = await box(page, '.qr-actions > button.link')
+            const fresh = await box(page, '.qr-actions > .qr-refresh')
+            expect(Math.abs(phone.height - fresh.height)).toBeLessThan(1)
+            expect(Math.abs(mid(phone) - mid(fresh))).toBeLessThan(1)
+        })
+    })
+}

@@ -1,0 +1,69 @@
+package com.tmplayer.desktop
+
+import com.tmplayer.data.MediaItem
+import com.tmplayer.data.SettingsStore
+import com.tmplayer.data.WatchLaterRecord
+import com.tmplayer.data.WatchedRecord
+import com.tmplayer.data.WatchedStore
+import com.tmplayer.i18n.L
+
+/**
+ * The small decisions behind the desktop's Watched list, kept apart from Compose so they can be
+ * tested: which way a menu's mark line reads, and how full a poster's bar is.
+ */
+object WatchedWords {
+
+    fun markLabel(onList: Boolean): String = if (onList) L.watchedMarkUnwatched else L.watchedMarkWatched
+
+    /**
+     * How much of a poster's bar is filled. A video part way through (a second viewing included)
+     * shows where it is; a finished one with no saved position runs full, since finishing it is
+     * exactly what clears the position and one marked by hand may never have been opened here.
+     * Null draws no bar.
+     */
+    fun posterProgress(fraction: Float?, finished: Boolean): Float? = when {
+        fraction != null && fraction > 0f -> fraction
+        finished -> 1f
+        else -> null
+    }
+
+    /** "Watched" under a finished poster's title, unless a second viewing is part way through. */
+    fun showsWatched(fraction: Float?, finished: Boolean): Boolean = finished && (fraction == null || fraction <= 0f)
+}
+
+/**
+ * Marks [item] watched by hand, or takes the mark off. Marking also forgets the saved position,
+ * which is what takes the video out of Continue watching, as on the phone.
+ */
+suspend fun setWatched(
+    store: WatchedStore,
+    settings: SettingsStore,
+    item: MediaItem,
+    chatTitle: String,
+    watched: Boolean,
+    now: Long = System.currentTimeMillis(),
+) {
+    // Every copy of the video the tile stands for: off Watch later when it is watched, unticked
+    // when it is not.
+    if (watched) {
+        store.markWatched(WatchedRecord.of(item, chatTitle, now, manual = true), copies = item.versions)
+        settings.clearResumePosition(item.chatId, item.messageId)
+    } else {
+        store.markUnwatched(item.chatId, item.messageId, copies = item.versions)
+    }
+}
+
+/** Puts [item] on Watch later, or takes it off: the pane's line and the poster menu's alike. */
+suspend fun setWatchLater(
+    store: WatchedStore,
+    item: MediaItem,
+    chatTitle: String,
+    add: Boolean,
+    now: Long = System.currentTimeMillis(),
+) {
+    if (add) {
+        store.watchLater.add(WatchLaterRecord.of(item, chatTitle, now))
+    } else {
+        store.watchLater.remove(item.chatId, item.messageId)
+    }
+}

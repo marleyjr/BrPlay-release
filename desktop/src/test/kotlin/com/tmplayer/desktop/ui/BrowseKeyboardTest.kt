@@ -1,0 +1,361 @@
+package com.tmplayer.desktop.ui
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.rightClick
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
+import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.withKeyDown
+import androidx.compose.ui.unit.dp
+import com.tmplayer.data.ChatKind
+import com.tmplayer.data.ChatSummary
+import com.tmplayer.data.DownloadRequest
+import com.tmplayer.data.DownloadRunner
+import com.tmplayer.data.MediaItem
+import com.tmplayer.data.SettingsStore
+import com.tmplayer.data.WatchedStore
+import com.tmplayer.ui.theme.TmMaterialTheme
+import org.junit.Assert.assertEquals
+import org.junit.Test
+import java.nio.file.Files
+
+/**
+ * The browse pages from the keyboard alone (B2.1, WAI-ARIA grid): the posters and the chat list
+ * driven off screen with made-up items.
+ */
+@OptIn(ExperimentalTestApi::class)
+class BrowseKeyboardTest {
+
+    private val settings = SettingsStore(
+        SettingsStore.openDataStore(Files.createTempDirectory("tm-keys").resolve(SettingsStore.FILE_NAME).toFile()),
+    )
+    private val shell = ShellState(
+        settings,
+        object : DownloadRunner {
+            override fun download(request: DownloadRequest) = Unit
+            override fun cancel(fileId: Int) = Unit
+            override fun pause(fileId: Int) = Unit
+        },
+        WatchedStore(WatchedStore.openDataStore(Files.createTempDirectory("tm-keys-watched").resolve(WatchedStore.FILE_NAME).toFile())),
+        services = { error("not used by these pages") },
+    )
+
+    private val videos = (0 until 10).map { at ->
+        MediaItem(
+            chatId = 2, messageId = at + 1L, fileId = 0, title = "Video $at", sizeBytes = 300L * 1024 * 1024,
+            durationSec = 1500, mimeType = "video/mp4", thumbnailFileId = 0, miniThumbnail = null, date = 0,
+            fileName = "Video $at.mkv",
+        )
+    }
+
+    private fun poster(n: Int) = hasText("Video $n") and hasClickAction()
+
+    @Test
+    fun `arrows home end and page keys move between posters`() = runComposeUiTest {
+        // 1000 dp less the padding is four 208 dp posters a row: rows 0-3, 4-7, 8-9.
+        setContent { TmMaterialTheme(dark = true) { Box(Modifier.size(1000.dp, 640.dp)) { VideoGrid(shell, videos, "Film Club") } } }
+        onNode(poster(0)).requestFocus()
+        onNode(poster(0)).assertIsFocused()
+
+        fun press(key: Key) = onNode(isFocused()).performKeyInput { pressKey(key) }
+
+        press(Key.DirectionRight)
+        onNode(poster(1)).assertIsFocused()
+        press(Key.DirectionDown)
+        onNode(poster(5)).assertIsFocused()
+        press(Key.MoveEnd)
+        onNode(poster(7)).assertIsFocused()
+        press(Key.DirectionRight) // the row's end: no wrap
+        onNode(poster(7)).assertIsFocused()
+        press(Key.MoveHome)
+        onNode(poster(4)).assertIsFocused()
+        press(Key.DirectionLeft) // the row's start: no wrap
+        onNode(poster(4)).assertIsFocused()
+        press(Key.DirectionDown) // into the short last row, which may need a scroll
+        onNode(poster(8)).assertIsFocused()
+        press(Key.DirectionUp)
+        press(Key.DirectionUp)
+        onNode(poster(0)).assertIsFocused()
+        onNode(isFocused()).performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.MoveEnd) } }
+        onNode(poster(9)).assertIsFocused()
+        press(Key.PageUp)
+        onNode(poster(1)).assertIsFocused()
+    }
+
+    /** The grid with the shell's detail pane over it, as the window draws them. */
+    private fun androidx.compose.ui.test.ComposeUiTest.gridWithPane() = setContent {
+        TmMaterialTheme(dark = true) {
+            Box(Modifier.size(1000.dp, 640.dp)) {
+                VideoGrid(shell, videos, "Film Club")
+                DetailPaneHost(shell)
+            }
+        }
+    }
+
+    private val keepers = com.tmplayer.data.Series(
+        "lighthouse keepers", "The Lighthouse Keepers",
+        listOf(
+            com.tmplayer.data.SeriesSeason(
+                1,
+                (1..3).map { n ->
+                    com.tmplayer.data.SeriesEpisode(
+                        MediaItem(
+                            chatId = 2, messageId = 100L + n, fileId = 0, title = "The Lighthouse Keepers S01E0$n",
+                            sizeBytes = 300L * 1024 * 1024, durationSec = 1500, mimeType = "video/mp4", thumbnailFileId = 0,
+                            miniThumbnail = null, date = n, fileName = "The.Lighthouse.Keepers.S01E0$n.mkv",
+                        ),
+                        1, n,
+                    )
+                },
+            ),
+        ),
+    )
+
+    private fun androidx.compose.ui.test.ComposeUiTest.showWithPane() = setContent {
+        TmMaterialTheme(dark = true) {
+            Box(Modifier.size(1200.dp, 800.dp)) {
+                SeriesPage(shell, keepers, rememberSeriesWatch(shell), onClose = {})
+                DetailPaneHost(shell)
+            }
+        }
+    }
+
+    @Test
+    fun `a show's Play pill plays at once, never the episode's pane, whatever the page first setting`() = runComposeUiTest {
+        shell.detailFirst = true
+        showWithPane()
+        onNode(hasText("Play S01E01") and hasClickAction()).performClick()
+        waitForIdle()
+        assertEquals(null, shell.detail)
+        assertEquals(101L, shell.nowPlaying?.item?.messageId)
+        // Pressed again from the same page: it plays again, and no pane stacks up.
+        shell.closePlayer()
+        onNode(hasText("Play S01E01") and hasClickAction()).performClick()
+        waitForIdle()
+        assertEquals(null, shell.detail)
+        assertEquals(101L, shell.nowPlaying?.item?.messageId)
+    }
+
+    @Test
+    fun `an episode card opens its pane first, whose Play plays, and Esc puts focus back on the card`() = runComposeUiTest {
+        shell.detailFirst = true
+        showWithPane()
+        val card = hasText("Episode 2", substring = true) and hasClickAction()
+        onNode(androidx.compose.ui.test.hasScrollAction()).performScrollToNode(card)
+        onNode(card).performClick()
+        waitForIdle()
+        assertEquals(102L, shell.detail?.item?.messageId)
+        onNode(isFocused()).performKeyInput { pressKey(Key.Escape) }
+        waitForIdle()
+        assertEquals(null, shell.detail)
+        onNode(card).assertIsFocused()
+        // Opened again: its Play starts the episode rather than another pane.
+        onNode(card).performClick()
+        waitForIdle()
+        assertEquals(102L, shell.detail?.item?.messageId)
+        onNode(isFocused()).assert(hasText("Play"))
+        onNode(isFocused()).performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals(null, shell.detail)
+        assertEquals(102L, shell.nowPlaying?.item?.messageId)
+    }
+
+    @Test
+    fun `with the page first off, an episode card plays at once`() = runComposeUiTest {
+        shell.detailFirst = false
+        showWithPane()
+        val card = hasText("Episode 3", substring = true) and hasClickAction()
+        onNode(androidx.compose.ui.test.hasScrollAction()).performScrollToNode(card)
+        onNode(card).performClick()
+        waitForIdle()
+        assertEquals(null, shell.detail)
+        assertEquals(103L, shell.nowPlaying?.item?.messageId)
+    }
+
+    @Test
+    fun `shift F10 the menu key and I open the detail pane, and Esc closes it back onto the poster`() = runComposeUiTest {
+        gridWithPane()
+        for (open in listOf<androidx.compose.ui.test.KeyInjectionScope.() -> Unit>(
+            { withKeyDown(Key.ShiftLeft) { pressKey(Key.F10) } },
+            { pressKey(Key.Menu) },
+            { pressKey(Key.I) },
+        )) {
+            onNode(poster(2)).requestFocus()
+            onNode(isFocused()).performKeyInput(open)
+            waitForIdle()
+            assertEquals("Video 2", shell.detail?.item?.title)
+            onNodeWithText("Details").assertExists()
+            onNodeWithText("Copy link").assertDoesNotExist()
+            // The first action takes focus, so Enter would play from the pane at once.
+            onNode(isFocused()).assert(hasText("Play"))
+            onNode(isFocused()).performKeyInput { pressKey(Key.Escape) }
+            waitForIdle()
+            assertEquals(null, shell.detail)
+            onNode(poster(2)).assertIsFocused()
+        }
+    }
+
+    @Test
+    fun `a right click opens the pane, a click on the scrim closes it, and its actions act`() = runComposeUiTest {
+        gridWithPane()
+        onNode(poster(5)).performMouseInput { rightClick() }
+        waitForIdle()
+        assertEquals("Video 5", shell.detail?.item?.title)
+        onNodeWithText("Play").performClick()
+        waitForIdle()
+        assertEquals(null, shell.detail)
+        assertEquals("Video 5", shell.nowPlaying?.item?.title)
+        shell.closePlayer()
+        // The first poster stays in sight to the start of the sheet, under its scrim.
+        onNode(poster(0)).performMouseInput { rightClick() }
+        waitForIdle()
+        onNode(poster(0)).performMouseInput { click(androidx.compose.ui.geometry.Offset(10f, 10f)) }
+        waitForIdle()
+        assertEquals(null, shell.detail)
+    }
+
+    @Test
+    fun `a protected video's pane offers no way to keep a copy`() = runComposeUiTest {
+        val locked = videos.map { it.copy(canBeSaved = false) }
+        setContent {
+            TmMaterialTheme(dark = true) {
+                Box(Modifier.size(1000.dp, 640.dp)) {
+                    VideoGrid(shell, locked, "Film Club")
+                    DetailPaneHost(shell)
+                }
+            }
+        }
+        onNode(poster(0)).performMouseInput { rightClick() }
+        waitForIdle()
+        onNodeWithText("Play").assertExists()
+        // Beside Play the everyday actions are round buttons, named by their descriptions.
+        onNode(androidx.compose.ui.test.hasContentDescription("Mark as watched")).assertExists()
+        for (gone in listOf("Download", "Copy link", "Copy Telegram link", "Open with", "Open in another player", "Select videos")) {
+            onNodeWithText(gone, substring = true).assertDoesNotExist()
+            onNode(androidx.compose.ui.test.hasContentDescription(gone, substring = true)).assertDoesNotExist()
+        }
+        shell.closeDetail()
+    }
+
+    @Test
+    fun `enter opens the focused poster's page first, p plays it`() = runComposeUiTest {
+        setContent { TmMaterialTheme(dark = true) { Box(Modifier.size(1000.dp, 640.dp)) { VideoGrid(shell, videos, "Film Club") } } }
+        onNode(poster(3)).requestFocus()
+        onNode(isFocused()).performKeyInput { pressKey(Key.Enter) }
+        assertEquals("Video 3", shell.detail?.item?.title)
+        assertEquals(null, shell.nowPlaying)
+        shell.closeDetail()
+        onNode(poster(3)).requestFocus()
+        onNode(isFocused()).performKeyInput { pressKey(Key.P) }
+        assertEquals("Video 3", shell.nowPlaying?.item?.title)
+    }
+
+    @Test
+    fun `with the page first off, enter plays the focused poster`() = runComposeUiTest {
+        shell.detailFirst = false
+        try {
+            setContent { TmMaterialTheme(dark = true) { Box(Modifier.size(1000.dp, 640.dp)) { VideoGrid(shell, videos, "Film Club") } } }
+            onNode(poster(3)).requestFocus()
+            onNode(isFocused()).performKeyInput { pressKey(Key.Enter) }
+            assertEquals("Video 3", shell.nowPlaying?.item?.title)
+            assertEquals(null, shell.detail)
+        } finally {
+            shell.detailFirst = true
+        }
+    }
+
+    @Test
+    fun `the chat list moves a row at a time and opens with enter`() = runComposeUiTest {
+        val chats = (1L..30L).map {
+            ChatSummary(id = it, title = "Chat $it", miniThumbnail = null, photoFileId = 0, kind = ChatKind.Channel, unreadCount = 0)
+        }
+        var opened by mutableStateOf<ChatSummary?>(null)
+        var starred by mutableStateOf(emptySet<Long>())
+        setContent {
+            TmMaterialTheme(dark = true) {
+                // Narrow enough for the one column list: wider windows draw the grid of chats.
+                Box(Modifier.size(600.dp, 500.dp)) {
+                    val list = remember { LazyListState() }
+                    val nav = rememberKeyboardNav(remember(list) { ListSurface(list) })
+                    ChatList(chats, starred, list, nav, onOpen = { opened = it }, onStar = { starred = starred + it.id })
+                }
+            }
+        }
+        fun row(n: Int) = hasText("Chat $n") and hasClickAction() and SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.Focused)
+        onNode(row(1)).requestFocus()
+        onNode(isFocused()).performKeyInput { pressKey(Key.DirectionDown) }
+        onNode(row(2)).assertIsFocused()
+        onNode(isFocused()).performKeyInput { pressKey(Key.PageDown) }
+        // A page is the rows on screen less one, so well past the third row.
+        onNode(isFocused()).assert(!(hasText("Chat 1") or hasText("Chat 2") or hasText("Chat 3")))
+        onNode(isFocused()).performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.MoveEnd) } }
+        onNode(row(30)).assertIsFocused()
+        onNode(isFocused()).performKeyInput { pressKey(Key.S) }
+        assertEquals(setOf(30L), starred)
+        onNode(isFocused()).performKeyInput { pressKey(Key.Enter) }
+        assertEquals(30L, opened?.id)
+        // Home alone is the top of a list, scrolled to; End the bottom.
+        onNode(isFocused()).performKeyInput { pressKey(Key.MoveHome) }
+        onNode(row(1)).assertIsFocused()
+        onNode(isFocused()).performKeyInput { pressKey(Key.MoveEnd) }
+        onNode(row(30)).assertIsFocused()
+    }
+
+    @Test
+    fun `h hides the focused chat, and shift F10 opens its menu with no telegram write left in it`() = runComposeUiTest {
+        val chats = listOf(
+            ChatSummary(id = 1, title = "Quiet", miniThumbnail = null, photoFileId = 0, kind = ChatKind.Channel, unreadCount = 0),
+            ChatSummary(id = 2, title = "Busy", miniThumbnail = null, photoFileId = 0, kind = ChatKind.Channel, unreadCount = 4),
+        )
+        val done = mutableListOf<String>()
+        val actions = ChatRowActions(
+            onHide = { done += "hide ${it.id}" },
+        )
+        setContent {
+            TmMaterialTheme(dark = true) {
+                Box(Modifier.size(900.dp, 500.dp)) {
+                    val list = remember { LazyListState() }
+                    val nav = rememberKeyboardNav(remember(list) { ListSurface(list) })
+                    ChatList(chats, emptySet(), list, nav, onOpen = {}, onStar = {}, actions = actions)
+                }
+            }
+        }
+        fun row(title: String) = hasText(title) and hasClickAction() and SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.Focused)
+        onNode(row("Busy")).requestFocus()
+        onNode(isFocused()).performKeyInput { pressKey(Key.H) }
+        assertEquals(listOf("hide 2"), done)
+
+        done.clear()
+        onNode(row("Quiet")).requestFocus()
+        onNode(isFocused()).performKeyInput { withKeyDown(Key.ShiftLeft) { pressKey(Key.F10) } }
+        onNodeWithText("Open").assertExists()
+        onNodeWithText("Remove from TMPlayer").assertExists()
+        onNodeWithText("Pin to the top").assertDoesNotExist()
+        onNodeWithText("Mute").assertDoesNotExist()
+        onNodeWithText("Archive").assertDoesNotExist()
+        onNodeWithText("Mark as read").assertDoesNotExist()
+        onNodeWithText("Remove from TMPlayer").performClick()
+        assertEquals(listOf("hide 1"), done)
+    }
+}

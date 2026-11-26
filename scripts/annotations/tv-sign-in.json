@@ -1,0 +1,9 @@
+{
+  "source": "tv-sign-in-dark.png",
+  "output": "site/public/screenshots/tv-sign-in.webp",
+  "crop": [0, 140, 1800, 900],
+  "width": 960,
+  "marks": [
+    {"type": "circle", "box": [130, 275, 530, 530]}
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "source": "ph-perf-full-dark.png",
+  "output": "app/src/main/res/drawable-nodpi/setup_performance_full_dark.webp",
+  "crop": [
+    36,
+    1448,
+    660,
+    660
+  ],
+  "width": 440,
+  "marks": [
+    {
+      "type": "arrow",
+      "from": [
+        630,
+        2090
+      ],
+      "to": [
+        600,
+        1790
+      ],
+      "bend": 0.25,
+      "seed": 47
+    }
+  ]
+}

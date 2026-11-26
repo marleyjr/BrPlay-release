@@ -1,0 +1,40 @@
+# Maintainer: dracu-lah <noreply@github.com>
+#
+# Arch Linux package over the release tarball, published to the AUR as tmplayer-bin by the release
+# job once the AUR_SSH_PRIVATE_KEY secret is set (docs/distribution/aur.md). The release job also
+# bumps it: scripts/aur-bump.py sets pkgver, resets pkgrel to 1 and writes the tarball's SHA-256.
+# The AUR's .SRCINFO is generated on publish, so none is kept here. To build it locally:
+#
+#   cd desktop/packaging/aur && makepkg -si
+pkgname=tmplayer-bin
+_appid=io.github.dracu_lah.TMPlayer
+pkgver=1.28.5
+pkgrel=1
+pkgdesc="Watch the videos in your Telegram chats while they download (unofficial client)"
+arch=('x86_64')
+url="https://tmplayer.org"
+license=('GPL-3.0-or-later')
+provides=('tmplayer')
+conflicts=('tmplayer')
+# The bundled JVM, TDLib and libmpv need these from the system.
+depends=('glibc>=2.38' 'gcc-libs' 'openssl' 'zlib' 'alsa-lib' 'libpulse' 'libglvnd'
+         'vulkan-icd-loader' 'libx11' 'libxext' 'libxrender' 'libxtst' 'libxi' 'fontconfig'
+         'hicolor-icon-theme')
+# Prebuilt and already stripped; stripping would also break libskiko's checksum.
+options=('!strip' '!debug')
+source=("https://github.com/dracu-lah/TMPlayer/releases/download/v${pkgver}/TMPlayer-${pkgver}-linux-x64.tar.xz")
+sha256sums=('d49455ca61512c057bd909a8bc3976d9209657b68fb399f8250aa3d8495d0b7a')
+
+package() {
+  cd "TMPlayer-${pkgver}"
+  install -dm755 "${pkgdir}/opt/tmplayer"
+  cp -a bin lib "${pkgdir}/opt/tmplayer/"
+  install -dm755 "${pkgdir}/usr/bin"
+  ln -s /opt/tmplayer/bin/TMPlayer "${pkgdir}/usr/bin/tmplayer"
+  install -Dm644 "share/applications/${_appid}.desktop" "${pkgdir}/usr/share/applications/${_appid}.desktop"
+  install -Dm644 "share/metainfo/${_appid}.metainfo.xml" "${pkgdir}/usr/share/metainfo/${_appid}.metainfo.xml"
+  cp -a share/icons "${pkgdir}/usr/share/"
+  install -Dm644 share/doc/tmplayer/copyright "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 -t "${pkgdir}/usr/share/licenses/${pkgname}" \
+    share/doc/tmplayer/LICENSE-OPENSSL-EXCEPTION.md share/doc/tmplayer/THIRD_PARTY_NOTICES.md
+}

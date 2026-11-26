@@ -1,0 +1,26 @@
+{
+  "source": "tvt-perf-lighter.png",
+  "output": "app/src/main/res/drawable-nodpi/setup_performance_lighter_tv.webp",
+  "crop": [
+    462,
+    612,
+    536,
+    536
+  ],
+  "width": 480,
+  "marks": [
+    {
+      "type": "arrow",
+      "from": [
+        950,
+        1132
+      ],
+      "to": [
+        915,
+        902
+      ],
+      "bend": 0.25,
+      "seed": 48
+    }
+  ]
+}

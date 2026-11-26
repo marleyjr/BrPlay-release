@@ -1,0 +1,59 @@
+# Gradle
+.gradle/
+build/
+app/build/
+
+# Local machine config + secrets (Telegram api_id/api_hash live here)
+local.properties
+
+# Signing
+*.keystore
+*.jks
+keystore.properties
+
+# IDE
+.idea/
+*.iml
+.kotlin/
+
+# Misc
+captures/
+.DS_Store
+
+# Python bytecode from the scripts in scripts/
+__pycache__/
+/promo-art-src/
+
+# Astro site build
+site/dist/
+site/node_modules/
+site/.astro/
+
+# Working notes kept off GitHub (plan, SEO and outreach)
+private/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
+
+# BRPLAY: local state and server files are not needed to build the client.
+node_modules/
+.gradle-codex/
+.codex/
+*.db
+*.db-*
+*.sqlite*
+*.session*
+*.log
+logs/
+tdlib/
+/bot/
+/exemplo/
+/*.zip
+
+# Initial import: use only the manual fork build, not upstream publishing/CI jobs.
+/.github/workflows/*
+!/.github/workflows/brplay-windows.yml

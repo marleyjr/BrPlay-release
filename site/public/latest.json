@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "version": "1.28.5",
+  "versionCode": 1280599,
+  "published": "2026-11-11T09:50:47Z",
+  "releaseUrl": "https://github.com/dracu-lah/TMPlayer/releases/tag/v1.28.5",
+  "notes": "Czech (\u010ce\u0161tina) added: the app, the site and its pages are translated. Russian wording and grammar fixed throughout, and the button is \u0421\u043c\u043e\u0442\u0440\u0435\u0442\u044c everywhere. Polish and Czech letters now draw in the site's fallback font.",
+  "changes": [
+    "Czech (\u010ce\u0161tina) added: the app, the site and its pages are translated",
+    "Russian wording and grammar fixed throughout, and the button is \u0421\u043c\u043e\u0442\u0440\u0435\u0442\u044c everywhere",
+    "Polish and Czech letters now draw in the site's fallback font"
+  ],
+  "assets": {
+    "android-universal": {
+      "url": "https://tmplayer-download-mirror.dracu.workers.dev/download/v1.28.5/TMPlayer-1.28.5-universal.apk",
+      "sha256": "90a37a3f7abd3a86f1d6208bf970e6a65c5bfbf4c1b0ad71ce70a66a35c63fe3",
+      "size": 34417672
+    },
+    "windows-x64-msi-v2": {
+      "url": "https://tmplayer-download-mirror.dracu.workers.dev/download/v1.28.5/TMPlayer-1.28.5-windows-x64.msi",
+      "sha256": "2ab7d12f2b27f7f77e0b2455b35974b97e64d114619e6eacf53b12a2fa06d903",
+      "size": 111572112
+    },
+    "macos-arm64-dmg": {
+      "url": "https://tmplayer-download-mirror.dracu.workers.dev/download/v1.28.5/TMPlayer-1.28.5-macos-arm64.dmg",
+      "sha256": "364c6b903d82b3b2a86efa329b0c83183dc7eddea68522a39a92e76eac687cd4",
+      "size": 118953392
+    },
+    "linux-x64-appimage": {
+      "url": "https://tmplayer-download-mirror.dracu.workers.dev/download/v1.28.5/TMPlayer-1.28.5-x86_64.AppImage",
+      "sha256": "46d75c6d3615a375fce6f6b5198042d5e03b4a45290f5c2b8ef8630058273155",
+      "size": 104634872
+    },
+    "linux-x64-tarball": {
+      "url": "https://tmplayer-download-mirror.dracu.workers.dev/download/v1.28.5/TMPlayer-1.28.5-linux-x64.tar.xz",
+      "sha256": "d49455ca61512c057bd909a8bc3976d9209657b68fb399f8250aa3d8495d0b7a",
+      "size": 74883432
+    }
+  }
+}
